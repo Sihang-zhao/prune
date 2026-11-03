@@ -1,0 +1,91 @@
+{
+  "extraction_date": "2026-11-03",
+  "source_root": "prune",
+  "source_results_directory": "prune/outputs/q_flowcover_direct_residual",
+  "historical_method": "q_flowcover_direct_residual",
+  "historical_entrypoint_inferred_from_configuration": "prune/testn.py",
+  "historical_commit": "unknown",
+  "historical_source_snapshot_available": false,
+  "provenance_boundary": "Historical run configurations, summaries, and logs identify the method and settings; no source snapshot or historical commit ID was recorded. File hashes below identify the current source used for this extraction, not a verified historical commit.",
+  "original_source_sha256": {
+    "prune/testn.py": "05f0ce575b446bb188a17777cd49d96cee1062bc5b8edd4ad1882757129bfa32",
+    "prune/testx.py": "85fc092f57c02f72e874e95013834586bc49f08700e80403acab24c0035d90cf",
+    "prune/testp.py": "38b6083b529bcb3b17917b790e0e026e0f98cf92fc8bb5e7ec3028aaaaff927d",
+    "prune/compression/__init__.py": "c4fc28eabd5fc15e180260434023991f311a5fea57383daff70bb7426ea6255c",
+    "prune/compression/q_flowcover.py": "a6e4c02d0dfc6c8a62f646a2375220364256d56bc8f85929f0c0f38803ae6d2d",
+    "prune/compression/q_flowcover_variants.py": "23b715c5ee755430615ceb9c6b699e6768f367c43f4d8db11cd7cb86dbe6be77",
+    "prune/compression/qwen3_vl_modes.py": "019ba06020f88faf222cdb0d13002145cd44820be9cef21c1d3735e8f8a1d2ea",
+    "prune/compression/testx_worker.py": "1d5ed2c0549f6158131c841ae39d0c196ae424928c7cc65d30d352a3b0271582",
+    "prune/compression/readout_verified_bridge.py": "bc3cf707194486579f4545490e6f87375cf56c9d6eaa13d46d458cfd82172993",
+    "prune/model/__init__.py": "8840739983775be7ef208ed2039de691a1141d986e5bedc0346cb71868918f56",
+    "prune/model/qwen_vl.py": "02fd88623ffa24d115839a380c476ad1e30e77fe8cf86fffa7834aee231c8937",
+    "prune/model/training_free_pruning.py": "33855a838ea93deec50a693684a2590b1fe87584d80a641380bb9915ae860f5e",
+    "prune/utils/data.py": "ee819dd8c83a637267a14d21dfbc312985a34eb5a2f3dfe34c604fa0b0d22507",
+    "prune/utils/images.py": "93da406e9d3c7e7430401310cf849e6975321e8941b418844bb175b85ecd7648",
+    "prune/utils/metrics.py": "7d10483e2c84125aedbc884a1d7e723be4743178153d1cd4d4bfadddb804b1eb",
+    "prune/utils/tasks.py": "04aff334f70c25a6b87d7caeec76029084f06b705398eadd28de8f384db9b8ac",
+    "prune/utils/xlrs_oluc.py": "d428cc988334f01b316d33cce55d0b6aac0dbe21d101f75be8838fc27baf914c"
+  },
+  "unchanged_algorithm_files": [
+    "compression/q_flowcover.py",
+    "compression/q_flowcover_variants.py"
+  ],
+  "historical_run_artifacts": [
+    {
+      "run": "outputs/q_flowcover_direct_residual/prune_50/1023_1149",
+      "config": "outputs/q_flowcover_direct_residual/prune_50/1023_1149/config.json",
+      "config_sha256": "2ad4f1f7a3e8d997657488feab628e61d9fcf24bd5f6cab1989a17f12fc2e5d8",
+      "summary": "outputs/q_flowcover_direct_residual/prune_50/1023_1149/summary.json",
+      "summary_sha256": "a5ddd861c2bbc7be2d7ac45830f2adbc7d632d11c8a08cb7851b329262b1a3cc",
+      "published_summary": "results/reference_summaries/prune_50.json"
+    },
+    {
+      "run": "outputs/q_flowcover_direct_residual/prune_60/1023_1156",
+      "config": "outputs/q_flowcover_direct_residual/prune_60/1023_1156/config.json",
+      "config_sha256": "4b179749bcb870682e646b05dbae8d4f18447a3298470285b1e08d683e4851fc",
+      "summary": "outputs/q_flowcover_direct_residual/prune_60/1023_1156/summary.json",
+      "summary_sha256": "3d76ead27b52d85bc0fbd7290f898e18cf9f110747448e0226855003109b8940",
+      "published_summary": "results/reference_summaries/prune_60.json"
+    },
+    {
+      "run": "outputs/q_flowcover_direct_residual/prune_70/1023_1203",
+      "config": "outputs/q_flowcover_direct_residual/prune_70/1023_1203/config.json",
+      "config_sha256": "26cb69d0778417e00949cedfc5c8632844bd8be3cb37dc354af290354e214b3e",
+      "summary": "outputs/q_flowcover_direct_residual/prune_70/1023_1203/summary.json",
+      "summary_sha256": "4fd69493d1a10871e0dbb1efa7f671b3ddd391336204dd10c7ec089860f5d53a",
+      "published_summary": "results/reference_summaries/prune_70.json"
+    },
+    {
+      "run": "outputs/q_flowcover_direct_residual/prune_80/1023_1209",
+      "config": "outputs/q_flowcover_direct_residual/prune_80/1023_1209/config.json",
+      "config_sha256": "d189d03599cd091356f9fa5db3338b92e2ad7e316560245a4ebe3762c2fcb8c4",
+      "summary": "outputs/q_flowcover_direct_residual/prune_80/1023_1209/summary.json",
+      "summary_sha256": "8f5f0d2a26923e0e99b8c5791300591d03fbbf765716b12358f093521bba885c",
+      "published_summary": "results/reference_summaries/prune_80.json"
+    },
+    {
+      "run": "outputs/q_flowcover_direct_residual/prune_85/1023_1214",
+      "config": "outputs/q_flowcover_direct_residual/prune_85/1023_1214/config.json",
+      "config_sha256": "7de519d02adfc1c763d18f78089000f32b0675fdab42febb4781228803d62098",
+      "summary": "outputs/q_flowcover_direct_residual/prune_85/1023_1214/summary.json",
+      "summary_sha256": "be5944761b0d84160f76d04fa3a702d825325985a7a5c166817d8763fb8d7eb0",
+      "published_summary": "results/reference_summaries/prune_85.json"
+    },
+    {
+      "run": "outputs/q_flowcover_direct_residual/prune_90/1023_1219",
+      "config": "outputs/q_flowcover_direct_residual/prune_90/1023_1219/config.json",
+      "config_sha256": "f601d1b1b35f0d494f055921773ded775cfbfdee19eb079a5b47910946b84df5",
+      "summary": "outputs/q_flowcover_direct_residual/prune_90/1023_1219/summary.json",
+      "summary_sha256": "dbefebd39919c3e26d31558715f9df203e3fdef1dc6552d262d5dd5b7a0bcbe5",
+      "published_summary": "results/reference_summaries/prune_90.json"
+    },
+    {
+      "run": "outputs/q_flowcover_direct_residual/prune_95/1023_1224",
+      "config": "outputs/q_flowcover_direct_residual/prune_95/1023_1224/config.json",
+      "config_sha256": "a5758db15738e7df74e7d8828deb729ef635e2275fef47ff8e8f229f98577e7b",
+      "summary": "outputs/q_flowcover_direct_residual/prune_95/1023_1224/summary.json",
+      "summary_sha256": "32ea2cb4d681d82da62482ea4130147fecaaabb890763da6fabe96479fb46d21",
+      "published_summary": "results/reference_summaries/prune_95.json"
+    }
+  ]
+}

@@ -1,0 +1,277 @@
+{
+  "total": 260,
+  "correct": 130,
+  "errors": 0,
+  "acc": 0.5,
+  "micro_acc": 0.5,
+  "macro_acc": 0.5,
+  "macro_task_count": 13,
+  "perception_acc": 0.45625000000000004,
+  "perception_task_count": 8,
+  "reasoning_acc": 0.5700000000000001,
+  "reasoning_task_count": 5,
+  "valid_total": 260,
+  "coverage": 1.0,
+  "error_rate": 0.0,
+  "avg_testtime": 0.5098514604307218,
+  "avg_flops": 18681801069634.953,
+  "avg_tflops": 18.681801069634954,
+  "avg_tflops_per_sec": 36.488902750563994,
+  "total_flops": 4857268278105088,
+  "total_tflops": 4857.268278105088,
+  "taskL3": {
+    "AD": {
+      "correct": 15,
+      "total": 20,
+      "acc": 0.75,
+      "avg_testtime": 0.6122157628982677,
+      "avg_flops": 20385272160256.0,
+      "avg_tflops": 20.385272160256,
+      "avg_tflops_per_sec": 36.067912952277084
+    },
+    "CCR": {
+      "correct": 9,
+      "total": 20,
+      "acc": 0.45,
+      "avg_testtime": 0.5338449737500923,
+      "avg_flops": 19680814739865.6,
+      "avg_tflops": 19.680814739865603,
+      "avg_tflops_per_sec": 36.87074875456613
+    },
+    "ECR": {
+      "correct": 16,
+      "total": 20,
+      "acc": 0.8,
+      "avg_testtime": 0.5422742296490469,
+      "avg_flops": 20834979480576.0,
+      "avg_tflops": 20.834979480576,
+      "avg_tflops_per_sec": 38.436943848088404
+    },
+    "OC": {
+      "correct": 2,
+      "total": 20,
+      "acc": 0.1,
+      "avg_testtime": 0.5321833428009995,
+      "avg_flops": 19594682923417.6,
+      "avg_tflops": 19.5946829234176,
+      "avg_tflops_per_sec": 36.821427201592044
+    },
+    "OCC": {
+      "correct": 6,
+      "total": 20,
+      "acc": 0.3,
+      "avg_testtime": 0.5156282531497709,
+      "avg_flops": 20171471636940.8,
+      "avg_tflops": 20.1714716369408,
+      "avg_tflops_per_sec": 39.13055578036253
+    },
+    "OCL": {
+      "correct": 12,
+      "total": 20,
+      "acc": 0.6,
+      "avg_testtime": 0.5136411426494305,
+      "avg_flops": 20151747430809.6,
+      "avg_tflops": 20.1517474308096,
+      "avg_tflops_per_sec": 39.23649079240717
+    },
+    "OLUC": {
+      "correct": 6,
+      "total": 20,
+      "acc": 0.3,
+      "avg_testtime": 0.5476264639000874,
+      "avg_flops": 19640395654758.4,
+      "avg_tflops": 19.6403956547584,
+      "avg_tflops_per_sec": 35.94801778623894
+    },
+    "OMS": {
+      "correct": 15,
+      "total": 20,
+      "acc": 0.75,
+      "avg_testtime": 0.5123983804514864,
+      "avg_flops": 20003427722035.2,
+      "avg_tflops": 20.003427722035198,
+      "avg_tflops_per_sec": 39.04066953349059
+    },
+    "OSR": {
+      "correct": 7,
+      "total": 20,
+      "acc": 0.35,
+      "avg_testtime": 0.5823257631993328,
+      "avg_flops": 19814260470579.2,
+      "avg_tflops": 19.8142604705792,
+      "avg_tflops_per_sec": 37.0625590832114
+    },
+    "RC": {
+      "correct": 9,
+      "total": 20,
+      "acc": 0.45,
+      "avg_testtime": 0.5925944480499311,
+      "avg_flops": 19534326268313.6,
+      "avg_tflops": 19.534326268313603,
+      "avg_tflops_per_sec": 35.71808048442283
+    },
+    "RCCD": {
+      "correct": 7,
+      "total": 20,
+      "acc": 0.35,
+      "avg_testtime": 0.09175972455122974,
+      "avg_flops": 1967974696960.0,
+      "avg_tflops": 1.96797469696,
+      "avg_tflops_per_sec": 21.927828162924055
+    },
+    "RLUC": {
+      "correct": 16,
+      "total": 20,
+      "acc": 0.8,
+      "avg_testtime": 0.5131555478488735,
+      "avg_flops": 19621876616806.4,
+      "avg_tflops": 19.6218766168064,
+      "avg_tflops_per_sec": 38.24698459460398
+    },
+    "RP": {
+      "correct": 10,
+      "total": 20,
+      "acc": 0.5,
+      "avg_testtime": 0.5384209527008352,
+      "avg_flops": 21462184103936.0,
+      "avg_tflops": 21.462184103936,
+      "avg_tflops_per_sec": 39.84751678314664
+    }
+  },
+  "categories": {
+    "AD": {
+      "correct": 15,
+      "total": 20,
+      "acc": 0.75,
+      "avg_testtime": 0.6122157628982677,
+      "avg_flops": 20385272160256.0,
+      "avg_tflops": 20.385272160256,
+      "avg_tflops_per_sec": 36.067912952277084
+    },
+    "CCR": {
+      "correct": 9,
+      "total": 20,
+      "acc": 0.45,
+      "avg_testtime": 0.5338449737500923,
+      "avg_flops": 19680814739865.6,
+      "avg_tflops": 19.680814739865603,
+      "avg_tflops_per_sec": 36.87074875456613
+    },
+    "ECR": {
+      "correct": 16,
+      "total": 20,
+      "acc": 0.8,
+      "avg_testtime": 0.5422742296490469,
+      "avg_flops": 20834979480576.0,
+      "avg_tflops": 20.834979480576,
+      "avg_tflops_per_sec": 38.436943848088404
+    },
+    "OC": {
+      "correct": 2,
+      "total": 20,
+      "acc": 0.1,
+      "avg_testtime": 0.5321833428009995,
+      "avg_flops": 19594682923417.6,
+      "avg_tflops": 19.5946829234176,
+      "avg_tflops_per_sec": 36.821427201592044
+    },
+    "OCC": {
+      "correct": 6,
+      "total": 20,
+      "acc": 0.3,
+      "avg_testtime": 0.5156282531497709,
+      "avg_flops": 20171471636940.8,
+      "avg_tflops": 20.1714716369408,
+      "avg_tflops_per_sec": 39.13055578036253
+    },
+    "OCL": {
+      "correct": 12,
+      "total": 20,
+      "acc": 0.6,
+      "avg_testtime": 0.5136411426494305,
+      "avg_flops": 20151747430809.6,
+      "avg_tflops": 20.1517474308096,
+      "avg_tflops_per_sec": 39.23649079240717
+    },
+    "OLUC": {
+      "correct": 6,
+      "total": 20,
+      "acc": 0.3,
+      "avg_testtime": 0.5476264639000874,
+      "avg_flops": 19640395654758.4,
+      "avg_tflops": 19.6403956547584,
+      "avg_tflops_per_sec": 35.94801778623894
+    },
+    "OMS": {
+      "correct": 15,
+      "total": 20,
+      "acc": 0.75,
+      "avg_testtime": 0.5123983804514864,
+      "avg_flops": 20003427722035.2,
+      "avg_tflops": 20.003427722035198,
+      "avg_tflops_per_sec": 39.04066953349059
+    },
+    "OSR": {
+      "correct": 7,
+      "total": 20,
+      "acc": 0.35,
+      "avg_testtime": 0.5823257631993328,
+      "avg_flops": 19814260470579.2,
+      "avg_tflops": 19.8142604705792,
+      "avg_tflops_per_sec": 37.0625590832114
+    },
+    "RC": {
+      "correct": 9,
+      "total": 20,
+      "acc": 0.45,
+      "avg_testtime": 0.5925944480499311,
+      "avg_flops": 19534326268313.6,
+      "avg_tflops": 19.534326268313603,
+      "avg_tflops_per_sec": 35.71808048442283
+    },
+    "RCCD": {
+      "correct": 7,
+      "total": 20,
+      "acc": 0.35,
+      "avg_testtime": 0.09175972455122974,
+      "avg_flops": 1967974696960.0,
+      "avg_tflops": 1.96797469696,
+      "avg_tflops_per_sec": 21.927828162924055
+    },
+    "RLUC": {
+      "correct": 16,
+      "total": 20,
+      "acc": 0.8,
+      "avg_testtime": 0.5131555478488735,
+      "avg_flops": 19621876616806.4,
+      "avg_tflops": 19.6218766168064,
+      "avg_tflops_per_sec": 38.24698459460398
+    },
+    "RP": {
+      "correct": 10,
+      "total": 20,
+      "acc": 0.5,
+      "avg_testtime": 0.5384209527008352,
+      "avg_flops": 21462184103936.0,
+      "avg_tflops": 21.462184103936,
+      "avg_tflops_per_sec": 39.84751678314664
+    }
+  },
+  "subcategories": {
+    "default": {
+      "correct": 130,
+      "total": 260,
+      "acc": 0.5,
+      "avg_testtime": 0.5098514604307218,
+      "avg_flops": 18681801069634.953,
+      "avg_tflops": 18.681801069634954,
+      "avg_tflops_per_sec": 36.488902750563994
+    }
+  },
+  "retained_tokens": 295004,
+  "avg_retained_tokens": 1134.6307692307691,
+  "avg_retention_ratio": 0.2997312769553975,
+  "avg_pruning_latency": 0.4184763392808516,
+  "avg_prefill_latency": 0.03918935576926182,
+  "total_test_time": 357.5946573120018
+}
