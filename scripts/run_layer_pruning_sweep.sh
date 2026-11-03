@@ -14,7 +14,8 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # One independent pruning decision after each human-numbered visual block.
 for decision_layer in 15 16 17 18; do
-  bash "$script_dir/run_pruning_sweep.sh" \
+  QFLOW_SUMMARY_ROOT="$output_root" QFLOW_SUMMARY_LAYERS="15 16 17 18" \
+    bash "$script_dir/run_pruning_sweep.sh" \
     "$dataset_path" \
     "$model_path" \
     "$gpu_ids" \

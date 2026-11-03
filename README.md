@@ -116,6 +116,29 @@ bash scripts/run_layer_pruning_sweep.sh \
 
 中断后在同一命令增加 `--resume`，或使用 `--resume-from /path/to/run/results.jsonl`；必须保留对应 `config.json`，并匹配数据、模型、方法、预算、局部半径、affinity 和生成配置，防止混入其他实验结果。
 
+## 跨层、跨比例的结果总表
+
+两个批量脚本会在每组实验结束后自动刷新输出根目录的 `summary.csv`、`summary.md`、`summary.html` 和 `summary.json`。单层脚本汇总该层八档；跨层脚本在同一张表中汇总 15–18 层的全部 32 组，而不是只写每层各自的结果。
+
+总表以 `Method / Layer / Prune%` 标识实验，表头分组为：
+
+- **Perception**：OC、RC、OLUC、RLUC、OCC、OCL、OMS、OSR。
+- **Reasoning**：AD、ECR、RP、RCCD、CCR。
+- **Avg.**：13 个 L3 任务的宏平均准确率，百分比；不使用样本加权 micro accuracy。
+- **time**：平均每题秒数 `avg_testtime`；**TFLOPs**：平均每题估算计算量 `avg_tflops`。
+
+没有完成的层号/比例填 `—` 并标记 pending，缺少任务的格子也不填成 0。汇总只读取同一运行目录的 `config.json + summary.json`；同一组合有多次运行时选最新已完成记录，正在运行的新目录不会遮住已完成结果。不同数据集、模型、实际 dtype、视图预算、生成参数等不兼容配置会要求过滤或使用更窄的输入目录，避免混表。
+
+也可以随时手动重新汇总：
+
+```bash
+python scripts/summarize_results.py \
+  --input-root outputs/layer_sweep \
+  --output-prefix outputs/layer_sweep/summary
+```
+
+`--input-root` 可接多个结果根目录；`--layers`、`--prune-percents` 可调整表格网格，`--data`、`--model`、`--exec-mode`、`--dtype` 用于筛选。同目录的 JSON 保存来源运行路径，CSV 便于 Excel 分析，HTML / Markdown 使用 Perception 与 Reasoning 两级表头。
+
 ## 测试与来源
 
 ```bash
@@ -125,7 +148,7 @@ python -m unittest discover -s tests -v
 
 测试以 CPU 张量和本地初始化的 tiny Qwen3-VL 为主，不下载模型；覆盖独立 dense attention / direct-residual greedy 参考、半精度 support、固定预算、多视图、三种视觉执行路径、RoPE / DeepStack、CLI 和续跑契约。
 
-当前实测 **42 项全部通过、无跳过**，覆盖四个剪枝层、三种执行模式及 98% 极高剪枝下的最小组预算。另完成真实离线 CLI → spawn worker → 随机 tiny Qwen3-VL → 生成及结果写入，四个层号的 98% 剪枝均无运行错误；此前也验证了续跑 `reused=1, pending=0`。这些检查验证代码与接口，不替代 8B 模型的基准复测。
+当前实测 **60 项全部通过、无跳过**，覆盖四个剪枝层、三种执行模式、98% 极高剪枝下的最小组预算，以及汇总指标契约和 8 / 32 组脚本自动汇总。另完成真实离线 CLI → spawn worker → 随机 tiny Qwen3-VL → 生成及结果写入，四个层号的 98% 剪枝均无运行错误；此前也验证了续跑 `reused=1, pending=0`。这些检查验证代码与接口，不替代 8B 模型的基准复测。
 
 `testn.py → evaluator.py → compression/worker.py → Qwen3VLCompressionRunner → q_flowcover_variants.py` 是新的独立调用链，不依赖旁边的原工程目录。共用模型封装保留了部分原有基础 helper；核心 `q_flowcover.py` 和 `q_flowcover_variants.py` 与原文件逐字节一致。
 

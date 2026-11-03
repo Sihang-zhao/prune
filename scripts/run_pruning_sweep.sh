@@ -21,6 +21,26 @@ case "$decision_layer" in
 esac
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 python_bin="${QFLOW_PYTHON:-python}"
+summary_root="${QFLOW_SUMMARY_ROOT:-$output_root}"
+read -r -a summary_layers <<< "${QFLOW_SUMMARY_LAYERS:-$decision_layer}"
+
+update_summary() {
+  if ! "$python_bin" "$project_root/scripts/summarize_results.py" \
+    --input-root "$summary_root" \
+    --output-prefix "$summary_root/summary" \
+    --layers "${summary_layers[@]}" \
+    --prune-percents 50 60 70 80 85 90 95 98 \
+    --method q_flowcover_direct_residual \
+    --data "$dataset_path" \
+    --model "$model_path" \
+    --exec-mode hard18 \
+    --dtype bf16; then
+    echo "Summary update failed; run scripts/summarize_results.py again after checking its message. Benchmark results remain saved." >&2
+  fi
+}
+
+# Create pending rows up front and refresh after every completed experiment.
+update_summary
 
 for prune_percent in 50 60 70 80 85 90 95 98; do
   "$python_bin" "$project_root/testn.py" \
@@ -42,4 +62,5 @@ for prune_percent in 50 60 70 80 85 90 95 98; do
     --worker-cases 128 \
     --text-source baseline \
     --output-dir "$output_root/prune_${prune_percent}"
+  update_summary
 done
