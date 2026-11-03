@@ -138,11 +138,11 @@ class Qwen3VLCompressionRunner(_TrainingFreeQwenVL):
     def stages(self) -> tuple[str, ...]:
         base = list(super().stages())
         if self.compression_mode == "full19_gather":
-            base.insert(-2, "Full19Gather")
+            base.insert(-2, f"Full{self.decision_layer_human + 1}Gather")
         elif self.compression_mode == "att_bridge19_fullkv":
-            base.insert(-2, "AttentionBridge19FullKV")
+            base.insert(-2, f"AttentionBridge{self.decision_layer_human + 1}FullKV")
         else:
-            base.insert(-2, "Hard18")
+            base.insert(-2, f"Hard{self.decision_layer_human}")
         if self.prune_method != "text_cos":
             base.insert(-2, f"Q-FlowCover:{self.prune_method}")
         return tuple(base)
@@ -381,7 +381,7 @@ class Qwen3VLCompressionRunner(_TrainingFreeQwenVL):
                 }
                 rotary_module = None
                 original_rotary = None
-                # Capture the Q/K produced by the native layer-18 RoPE helper.
+                # Capture Q/K from the selected native visual block's RoPE.
                 if capture_flow_qk:
                     try:
                         from transformers.models.qwen3_vl import modeling_qwen3_vl as rotary_module
@@ -419,7 +419,9 @@ class Qwen3VLCompressionRunner(_TrainingFreeQwenVL):
                     selections = self._select_middle_text_tokens({self.pruning_layer: projected_views}, text_tokens, counts)
                 elif q_flow_selector:
                     if capture_flow_qk and captured_rotated_qk is None:
-                        raise RuntimeError("native block 17 did not expose RoPE-transformed Q/K")
+                        raise RuntimeError(
+                            f"native block {self.decision_block_index} did not expose RoPE-transformed Q/K"
+                        )
                     if capture_flow_qk:
                         q_raw, k_raw = captured_rotated_qk
                         if q_raw.ndim != 3 or k_raw.ndim != 3:
@@ -524,7 +526,7 @@ class Qwen3VLCompressionRunner(_TrainingFreeQwenVL):
                 if self.compression_mode == "full19_gather":
                     full_started = time.perf_counter()
                     full_hidden = block(hidden, cu_seqlens=cu, position_embeddings=position_embeddings)
-                    stage["full19_block"] = time.perf_counter() - full_started
+                    stage[f"full{self.decision_layer_human + 1}_block"] = time.perf_counter() - full_started
                     if layer_num in deepstack_indexes:
                         idx = deepstack_indexes.index(layer_num)
                         deepstack.append((vit.deepstack_merger_list[idx](full_hidden), False))

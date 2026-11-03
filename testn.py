@@ -20,7 +20,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--exec_mode", "--exec-mode",
         choices=("hard18", "full19_gather", "att_bridge19_fullkv"),
-        default="hard18", help="Execution of the visual blocks after the layer-18 decision",
+        default="hard18", help="Execution of visual blocks after the selected pruning layer",
     )
     parser.add_argument("--prune_fraction", "--prune-fraction", type=float, default=None,
                         help="Fraction removed, in [0,1); alternative to --visual-prune-percent")
@@ -45,18 +45,19 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--att_stats", "--att-stats", choices=("none", "summary", "debug"), default="none")
     parser.add_argument("--save_att_stats", "--save-att-stats", action="store_true")
     parser.add_argument("--max_debug_samples", "--max-debug-samples", type=int, default=0)
-    parser.add_argument("--decision_layer_human", "--decision-layer-human", type=int, choices=(18,), default=18,
-                        help="Fixed decision layer; 18 corresponds to visual block index 17")
+    parser.add_argument("--decision_layer_human", "--decision-layer-human", type=int, choices=(15, 16, 17, 18), default=18,
+                        help="Prune once after this visual block (1-based); the historical default is 18")
     return parser
 
 
-def resolve_decision_block(model: str) -> dict[str, Any]:
-    """Validate the fixed layer boundary when a local checkpoint is supplied."""
+def resolve_decision_block(model: str, decision_layer_human: int = 18) -> dict[str, Any]:
+    """Validate the selected layer boundary for a local checkpoint."""
+    layer = int(decision_layer_human)
     model_path = Path(model).expanduser()
     config_path = model_path / "config.json" if model_path.is_dir() else None
     details: dict[str, Any] = {
-        "decision_layer_human": 18,
-        "decision_block_index": 17,
+        "decision_layer_human": layer,
+        "decision_block_index": layer - 1,
         "config_path": str(config_path) if config_path else None,
         "config_verified": False,
     }
@@ -64,8 +65,8 @@ def resolve_decision_block(model: str) -> dict[str, Any]:
         config = json.loads(config_path.read_text(encoding="utf-8"))
         vision = config.get("vision_config", config)
         depth = int(vision.get("depth", vision.get("num_hidden_layers", 0)) or 0)
-        if depth <= 18:
-            raise ValueError(f"layer 18 must precede the final visual block; checkpoint depth={depth}")
+        if layer <= 0 or depth <= layer:
+            raise ValueError(f"layer {layer} must precede the final visual block; checkpoint depth={depth}")
         details.update(
             config_verified=True,
             vision_depth=depth,
@@ -100,9 +101,9 @@ def get_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--max-debug-samples must be non-negative")
     args.compression_mode = args.exec_mode
     args.pruning_mode = "middle_text_early"
-    args.pruning_layer = 18
+    args.pruning_layer = args.decision_layer_human
     args.pruning_strategy = "topk"
-    args.vision_layers = "6,18,24"
+    args.vision_layers = f"6,{args.decision_layer_human},24"
     args.visual_pruning = True
     args.q_flowcover_radius = args.qflow_radius
     args.q_flowcover_query_chunk = args.qflow_query_chunk
@@ -111,7 +112,7 @@ def get_args(argv: list[str] | None = None) -> argparse.Namespace:
     args.q_flowcover_local_radius = args.local_radius
     args.q_flowcover_adaptive_radius_max = args.adaptive_radius_max
     args.q_flowcover_affinity_mode = args.affinity_mode
-    for key, value in resolve_decision_block(args.model).items():
+    for key, value in resolve_decision_block(args.model, args.decision_layer_human).items():
         setattr(args, key, value)
     return args
 

@@ -44,16 +44,16 @@ class VisionPipelineTests(unittest.TestCase):
         self.pixels = torch.randn(48, 24)
         self.text = torch.randn(6, 24)
 
-    def _runner(self, mode="hard18", method="q_flowcover_direct_residual", keep=2, stats="none"):
+    def _runner(self, mode="hard18", method="q_flowcover_direct_residual", keep=2, stats="none", layer=18):
         runner = object.__new__(self.runner_cls)
         runner.model = SimpleNamespace(config=SimpleNamespace(vision_config=self.config))
         runner.vit = self.vit
         runner.projection = self.vit.merger
         runner.device = self.torch.device("cpu")
-        runner.pruning_layer = runner.decision_layer_human = 18
-        runner.decision_block_index = 17
-        runner.bridge_block_index = 18
-        runner.vision_layers = (6, 18, 20)
+        runner.pruning_layer = runner.decision_layer_human = layer
+        runner.decision_block_index = layer - 1
+        runner.bridge_block_index = layer
+        runner.vision_layers = (6, layer, 20)
         runner.visual_keep_ratio = 1.0 if keep is None else 0.5
         runner.visual_keep_tokens = keep
         runner.pruning_mode = "middle_text_early"
@@ -96,13 +96,13 @@ class VisionPipelineTests(unittest.TestCase):
 
     def test_fixed_k_compacts_at_the_expected_layer_for_all_modes(self):
         torch = self.torch
-        for mode, method in (
-            ("hard18", "q_flowcover_direct_residual"),
-            ("full19_gather", "q_flowcover_direct_residual"),
-            ("att_bridge19_fullkv", "q_flowcover_direct_residual"),
-            ("hard18", "text_cos"),
-        ):
-            with self.subTest(mode=mode, method=method):
+        cases = [
+            (layer, mode, "q_flowcover_direct_residual")
+            for layer in (15, 16, 17, 18)
+            for mode in ("hard18", "full19_gather", "att_bridge19_fullkv")
+        ] + [(18, "hard18", "text_cos")]
+        for layer, mode, method in cases:
+            with self.subTest(layer=layer, mode=mode, method=method):
                 traces = {}
 
                 def capture(index):
@@ -118,7 +118,7 @@ class VisionPipelineTests(unittest.TestCase):
                     for index in (0, 19)
                 ]
                 try:
-                    runner = self._run(self._runner(mode, method))
+                    runner = self._run(self._runner(mode, method, layer=layer))
                 finally:
                     for handle in handles:
                         handle.remove()
@@ -127,10 +127,11 @@ class VisionPipelineTests(unittest.TestCase):
                 self.assertEqual(len(runner._last_native_deepstack), 3)
                 for branch in runner._last_native_deepstack:
                     self.assertEqual([part.shape[0] for part in branch], [2, 2])
-                full_layers = 18 if mode == "hard18" else 19
+                full_layers = layer if mode == "hard18" else layer + 1
                 self.assertEqual(runner._last_vision_layer_token_counts, [48] * full_layers + [16] * (20 - full_layers))
                 for selection, count in zip(runner._last_early_selections, [4, 8]):
                     self.assertEqual(selection.indices.numel(), 2)
+                    self.assertEqual(selection.budget, (0, 2, 0))
                     self.assertEqual(torch.unique(selection.indices).numel(), 2)
                     self.assertTrue(bool((selection.indices < count).all()))
                 raw_keep = torch.cat([
@@ -142,6 +143,8 @@ class VisionPipelineTests(unittest.TestCase):
                 for original, compact in zip(traces[0][2], traces[19][2]):
                     torch.testing.assert_close(compact, original[raw_keep])
                 if method == "q_flowcover_direct_residual":
+                    self.assertEqual(runner._last_compression_metadata["decision_layer_human"], layer)
+                    self.assertEqual(runner._last_compression_metadata["decision_block_index"], layer - 1)
                     self.assertEqual([row["source_query_count"] for row in runner._last_q_flowcover_debug], [8, 8])
                     self.assertEqual(runner._last_compression_metadata["retained_group_count"], 4)
                     for record in runner._last_q_flowcover_debug:
@@ -154,14 +157,14 @@ class VisionPipelineTests(unittest.TestCase):
         torch = self.torch
         with torch.inference_mode():
             expected_final, expected_deepstack = self.vit(self.pixels, grid_thw=self.grid)
-        for mode, method in (
-            ("hard18", "q_flowcover_direct_residual"),
-            ("full19_gather", "q_flowcover_direct_residual"),
-            ("att_bridge19_fullkv", "q_flowcover_direct_residual"),
-            ("hard18", "text_cos"),
-        ):
-            with self.subTest(mode=mode, method=method):
-                runner = self._run(self._runner(mode, method, keep=None))
+        cases = [
+            (layer, mode, "q_flowcover_direct_residual")
+            for layer in (15, 16, 17, 18)
+            for mode in ("hard18", "full19_gather", "att_bridge19_fullkv")
+        ] + [(18, "hard18", "text_cos")]
+        for layer, mode, method in cases:
+            with self.subTest(layer=layer, mode=mode, method=method):
+                runner = self._run(self._runner(mode, method, keep=None, layer=layer))
                 torch.testing.assert_close(torch.cat(runner._last_native_final_features), expected_final, atol=1e-5, rtol=1e-5)
                 self.assertEqual(runner._last_vision_layer_token_counts, [48] * 20)
                 self.assertEqual(len(runner._last_native_deepstack), len(expected_deepstack))
@@ -169,6 +172,20 @@ class VisionPipelineTests(unittest.TestCase):
                     torch.testing.assert_close(torch.cat(branch), reference, atol=1e-5, rtol=1e-5)
                 for selection, count in zip(runner._last_early_selections, [4, 8]):
                     self.assertTrue(torch.equal(selection.indices, torch.arange(count)))
+
+    def test_ninety_eight_percent_keeps_at_least_one_group_per_view(self):
+        for layer in (15, 16, 17, 18):
+            with self.subTest(layer=layer):
+                runner = self._runner(keep=None, layer=layer)
+                runner.visual_keep_ratio = 0.02
+                self._run(runner)
+                self.assertEqual([part.shape[0] for part in runner._last_native_final_features], [1, 1])
+                self.assertEqual(runner._last_vision_layer_token_counts, [48] * layer + [8] * (20 - layer))
+                for selection in runner._last_early_selections:
+                    self.assertEqual(selection.budget, (0, 1, 0))
+                    self.assertEqual(selection.indices.numel(), 1)
+                for branch in runner._last_native_deepstack:
+                    self.assertEqual([part.shape[0] for part in branch], [1, 1])
 
     def test_multiple_views_match_independent_vision_calls(self):
         torch = self.torch

@@ -600,7 +600,7 @@ def test(args: argparse.Namespace) -> dict[str, Any]:
             if args.visual_keep_tokens is None
             else f"fixed K={args.visual_keep_tokens} per view"
         )
-        pruning_label = f"{args.prune_method}; {args.compression_mode}; layer 18; {budget_label}"
+        pruning_label = f"{args.prune_method}; {args.compression_mode}; layer {args.pruning_layer}; {budget_label}"
         markdown_text = markdown_path.read_text(encoding="utf-8")
         method_start = markdown_text.find("<tbody>\n<tr><td>")
         if method_start >= 0:

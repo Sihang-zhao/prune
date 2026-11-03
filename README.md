@@ -43,7 +43,7 @@ python testn.py \
 
 第一次检查可加 `--limit 2`。多卡使用 `--gpus 0,1`，各卡独立加载模型、处理不同样本；不进行模型切分。`--dtype auto` 在 CUDA 上自动选择 bf16 或 fp16；历史各档实际使用 bf16。无 CUDA 时可用 CPU 和 `--dtype fp32`，此时不传 `--gpus`。
 
-## 一次运行全部七档
+## 运行八档剪枝比例（含 98%）
 
 ```bash
 bash scripts/run_pruning_sweep.sh \
@@ -52,13 +52,26 @@ bash scripts/run_pruning_sweep.sh \
   0
 ```
 
-脚本依次运行 **50、60、70、80、85、90、95%** 剪枝，结果按比例分目录保存。可通过 `QFLOW_PYTHON=/path/to/environment/bin/python` 选择解释器；第 4 个位置参数可指定输出根目录。
+脚本依次运行 **50、60、70、80、85、90、95、98%** 剪枝，默认在第 18 层结束后剪枝。结果按比例分目录保存。可通过 `QFLOW_PYTHON=/path/to/environment/bin/python` 选择解释器；第 4 个位置参数指定输出根目录，第 5 个位置参数指定剪枝层（15、16、17、18，默认 18）。98% 是新增实验配置，不属于下面列出的七档历史结果。
+
+## 比较第 15–18 层的剪枝位置
+
+```bash
+bash scripts/run_layer_pruning_sweep.sh \
+  /path/to/XLRS-Bench-lite-subdata-20 \
+  /path/to/Qwen3-VL-8B \
+  0
+```
+
+这会独立运行 **4 层 × 8 比例 = 32 组** 实验，输出到 `outputs/q_flowcover_direct_residual_layers/layer_15/prune_50/` 等目录。层号从 1 开始，每组只在所选层结束后剪枝一次；例如第 15 层剪枝时，第 16 个视觉块开始使用紧凑 token。该网格已覆盖上一节的第 18 层八档实验，可以按需求选用一种脚本。
+
+单独指定位置可在 `testn.py` 命令中增加 `--decision-layer-human 15`（也支持下划线别名 `--decision_layer_human`）。默认 18 保持历史实验行为。
 
 如果使用完整 `XLRS-Bench-lite`，仅更换 `--data` 或脚本第一个参数即可，但应作为新的完整数据集实验报告。
 
 ## 方法与实际参数
 
-图像经完整视觉块 1–18，选择一次合并组后继续运行紧凑视觉块 19–27；每组包含完整的 2×2 原始 patch，原生位置、attention 边界和 DeepStack 使用同组索引对齐。问题评分使用原 LLM 输入词嵌入和冻结 merger 的第 18 层投影；生成提示保留题目、选项及回答要求。
+默认图像经完整视觉块 1–18，选择一次合并组后继续运行紧凑视觉块 19–27。选择层 L 也可设为 15、16、17，此时完整前缀为 1–L、紧凑后缀为 L+1–27；每组包含完整的 2×2 原始 patch，原生位置、attention 边界和 DeepStack 使用同组索引对齐。问题评分使用原 LLM 输入词嵌入和冻结 merger 的所选层投影；生成提示保留题目、选项及回答要求。
 
 `q_flowcover_direct_residual` 的步骤为：
 
@@ -79,7 +92,7 @@ bash scripts/run_pruning_sweep.sh \
 | `--adaptive-radius-max` | 保存为 `3`，此方法仍使用固定 local radius |
 | `--qflow-radius` / `--qflow-candidate-chunk` | 保留的历史字段，不参与此 direct-residual 分支 |
 
-公开入口还支持 `--prune-method text_cos` 基线。三种执行模式为默认 `hard18`、第 19 块完整计算后 gather 的 `full19_gather`，以及选中查询读取完整 K/V 的 `att_bridge19_fullkv`；历史七档均为 `hard18`。后两种模式用于额外对照，不是历史结果的参数。
+公开入口还支持 `--prune-method text_cos` 基线。执行模式名保留历史兼容：默认 `hard18` 在所选层 L 后立即压缩；`full19_gather` 在第 L+1 块完整计算后 gather；`att_bridge19_fullkv` 在第 L+1 块让选中查询读取完整 K/V，随后压缩。当 L=18 时分别对应历史的第 19 块。历史七档均为 L=18 的 `hard18`；其他层号和模式属于额外对照。
 
 ## 历史结果
 
@@ -112,7 +125,7 @@ python -m unittest discover -s tests -v
 
 测试以 CPU 张量和本地初始化的 tiny Qwen3-VL 为主，不下载模型；覆盖独立 dense attention / direct-residual greedy 参考、半精度 support、固定预算、多视图、三种视觉执行路径、RoPE / DeepStack、CLI 和续跑契约。
 
-本次整理实测 **37 项全部通过、无跳过**；另完成真实离线 CLI → spawn worker → 随机 tiny Qwen3-VL → 生成及结果写入，并验证续跑 `reused=1, pending=0`，两次均无运行错误。这些检查验证代码与接口，不替代 8B 模型的基准复测。
+当前实测 **42 项全部通过、无跳过**，覆盖四个剪枝层、三种执行模式及 98% 极高剪枝下的最小组预算。另完成真实离线 CLI → spawn worker → 随机 tiny Qwen3-VL → 生成及结果写入，四个层号的 98% 剪枝均无运行错误；此前也验证了续跑 `reused=1, pending=0`。这些检查验证代码与接口，不替代 8B 模型的基准复测。
 
 `testn.py → evaluator.py → compression/worker.py → Qwen3VLCompressionRunner → q_flowcover_variants.py` 是新的独立调用链，不依赖旁边的原工程目录。共用模型封装保留了部分原有基础 helper；核心 `q_flowcover.py` 和 `q_flowcover_variants.py` 与原文件逐字节一致。
 

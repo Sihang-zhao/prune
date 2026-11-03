@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 2 || $# -gt 4 ]]; then
-  echo "Usage: $0 DATA_DIRECTORY LOCAL_MODEL_DIRECTORY [GPU_IDS=0] [OUTPUT_ROOT=outputs/q_flowcover_direct_residual]" >&2
+if [[ $# -lt 2 || $# -gt 5 ]]; then
+  echo "Usage: $0 DATA_DIRECTORY LOCAL_MODEL_DIRECTORY [GPU_IDS=0] [OUTPUT_ROOT=outputs/q_flowcover_direct_residual] [DECISION_LAYER=18]" >&2
   exit 2
 fi
 
@@ -10,10 +10,19 @@ dataset_path="$1"
 model_path="$2"
 gpu_ids="${3:-0}"
 output_root="${4:-outputs/q_flowcover_direct_residual}"
+decision_layer="${5:-18}"
+# Layers are human-numbered (1-based): prune after the selected visual block.
+case "$decision_layer" in
+  15|16|17|18) ;;
+  *)
+    echo "DECISION_LAYER must be 15, 16, 17, or 18 (1-based)." >&2
+    exit 2
+    ;;
+esac
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 python_bin="${QFLOW_PYTHON:-python}"
 
-for prune_percent in 50 60 70 80 85 90 95; do
+for prune_percent in 50 60 70 80 85 90 95 98; do
   "$python_bin" "$project_root/testn.py" \
     --data "$dataset_path" \
     --model "$model_path" \
@@ -22,6 +31,7 @@ for prune_percent in 50 60 70 80 85 90 95; do
     --dtype bf16 \
     --prune-method q_flowcover_direct_residual \
     --exec-mode hard18 \
+    --decision-layer-human "$decision_layer" \
     --visual-prune-percent "$prune_percent" \
     --local-radius 1 \
     --affinity-mode raw \
