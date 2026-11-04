@@ -146,19 +146,37 @@ def _devices(cfg):
     return [f"cuda:{int(i)}" for i in ids]
 
 
-def _run_workers(cases, cfg, devices, log):
+def _run_workers(cases, cfg, devices, log, *, initial_rows=()):
+    from tqdm import tqdm
+
+    processed_count = len(initial_rows)
+    correct_count = sum(
+        bool(row.get("correct")) and row.get("status") != "error" for row in initial_rows
+    )
+    error_count = sum(row.get("status") == "error" or "error" in row for row in initial_rows)
+    progress_options = dict(
+        total=processed_count + len(cases), initial=processed_count, desc="Testing", unit="case"
+    )
     if not cases:
+        with tqdm(**progress_options) as progress:
+            progress.set_postfix(
+                acc=f"{correct_count / processed_count if processed_count else 0:.4f}",
+                errors=error_count,
+            )
         return []
     from .data import case_dict
     from .worker import worker
-    from tqdm import tqdm
 
     context = mp.get_context("spawn")
     size = cfg["worker_cases"] or len(cases)
     compact_rows = []
     with Path(cfg["output"]).open("a", encoding="utf-8") as handle, tqdm(
-        total=len(cases), desc="Testing", unit="case"
+        **progress_options
     ) as progress:
+        progress.set_postfix(
+            acc=f"{correct_count / processed_count if processed_count else 0:.4f}",
+            errors=error_count,
+        )
         for start in range(0, len(cases), size):
             batch = cases[start : start + size]
             result_queue = context.Queue()
@@ -204,9 +222,14 @@ def _run_workers(cases, cfg, devices, log):
                         compact.pop("pruning_diagnostics", None)
                         compact.pop("selected_indices", None)
                         compact_rows.append(compact)
+                        processed_count += 1
+                        correct_count += int(
+                            bool(value.get("correct")) and value.get("status") != "error"
+                        )
+                        error_count += int(value.get("status") == "error" or "error" in value)
                         progress.update(1)
                         progress.set_postfix(
-                            errors=sum(row.get("status") == "error" for row in compact_rows)
+                            acc=f"{correct_count / processed_count:.4f}", errors=error_count
                         )
                         if value.get("status") == "error":
                             log(f"case {value['index']} failed: {value.get('error')}")
@@ -296,7 +319,7 @@ def run(args):
         )
         log(f"reused={len(reused)} pending={len(pending)}")
         _seed_checkpoint(cfg["output"], reused)
-        generated = _run_workers(pending, cfg, devices, log)
+        generated = _run_workers(pending, cfg, devices, log, initial_rows=reused)
         rows = sorted(
             {int(row["index"]): row for row in reused + generated}.values(),
             key=lambda row: int(row["index"]),
