@@ -203,6 +203,7 @@ class Qwen3VLPerturbationRunner(PrunedQwenVL):
         perturbation_selector_impl: str = "reference",
         perturbation_max_attention_mb: float = 512.0,
         perturbation_greedy_backend: str = "reference",
+        perturbation_cancellation_recovery: str = "deferred",
         **kwargs: Any,
     ) -> None:
         _require_runtime()
@@ -239,8 +240,18 @@ class Qwen3VLPerturbationRunner(PrunedQwenVL):
             "reference",
             "local_refresh",
             "scripted_local_refresh",
+            "cuda_fused",
         }:
             raise ValueError("unknown optimized greedy backend")
+        if perturbation_cancellation_recovery not in {"deferred", "inline"}:
+            raise ValueError("cancellation recovery must be deferred or inline")
+        if perturbation_greedy_backend == "cuda_fused" and int(perturbation_local_radius) > 2:
+            raise ValueError("cuda_fused supports local radius 0, 1 or 2")
+        if perturbation_selector_impl != "optimized" and (
+            perturbation_cancellation_recovery != "deferred"
+            or perturbation_greedy_backend == "cuda_fused"
+        ):
+            raise ValueError("inline recovery and cuda_fused require optimized statistics")
         if not math.isfinite(perturbation_max_attention_mb) or perturbation_max_attention_mb <= 0:
             raise ValueError("optimized attention memory budget must be finite and positive")
         if kwargs.get("visual_pruning", True) is not True:
@@ -283,6 +294,7 @@ class Qwen3VLPerturbationRunner(PrunedQwenVL):
         self.perturbation_selector_impl = perturbation_selector_impl
         self.perturbation_max_attention_mb = float(perturbation_max_attention_mb)
         self.perturbation_greedy_backend = perturbation_greedy_backend
+        self.perturbation_cancellation_recovery = perturbation_cancellation_recovery
         self.att_stats_mode = "none"
         self.save_att_stats = False
         self.max_debug_samples = 0
@@ -465,6 +477,13 @@ class Qwen3VLPerturbationRunner(PrunedQwenVL):
                         "max_attention_mb": self.perturbation_max_attention_mb,
                         "greedy_backend": self.perturbation_greedy_backend,
                     }
+                    if (
+                        getattr(self, "perturbation_cancellation_recovery", "deferred")
+                        != "deferred"
+                    ):
+                        implementation_kwargs["cancellation_recovery"] = (
+                            self.perturbation_cancellation_recovery
+                        )
                 else:
                     raise RuntimeError(
                         "unknown perturbation implementation; no fallback is permitted"

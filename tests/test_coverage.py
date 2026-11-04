@@ -9,6 +9,8 @@ import torch
 from pruning.coverage import BACKENDS, greedy_direct_cover_optimized
 from pruning.reference import greedy_direct_cover, sparse_local_affinity
 
+CPU_BACKENDS = tuple(name for name in BACKENDS if name != "cuda_fused")
+
 
 class PerturbationOptimizedGreedyTests(unittest.TestCase):
     @classmethod
@@ -32,7 +34,7 @@ class PerturbationOptimizedGreedyTests(unittest.TestCase):
     def compare(self, case, keep, **kw):
         text, residual, affinity, table, valid = case
         expected = greedy_direct_cover(text, residual, keep, affinity, table, valid)
-        for backend in BACKENDS:
+        for backend in CPU_BACKENDS:
             actual = greedy_direct_cover_optimized(
                 text, residual, keep, affinity, table, valid, backend=backend, **kw
             )
@@ -58,7 +60,7 @@ class PerturbationOptimizedGreedyTests(unittest.TestCase):
         case[0] = torch.ones(28)
         case[1] = torch.zeros(28)
         self.compare(case, 19)
-        for backend in BACKENDS:
+        for backend in CPU_BACKENDS:
             ids, gains = greedy_direct_cover_optimized(
                 case[0], case[1], 19, *case[2:], backend=backend
             )
@@ -134,7 +136,7 @@ class PerturbationOptimizedGreedyTests(unittest.TestCase):
         first = self.case(5, 7, 1, 2)
         saved = [x.clone() for x in first]
         second = self.case(5, 7, 1, 3)
-        for backend in BACKENDS:
+        for backend in CPU_BACKENDS:
             a = greedy_direct_cover_optimized(first[0], first[1], 15, *first[2:], backend=backend)
             greedy_direct_cover_optimized(second[0], second[1], 15, *second[2:], backend=backend)
             b = greedy_direct_cover_optimized(first[0], first[1], 15, *first[2:], backend=backend)
@@ -150,7 +152,7 @@ class PerturbationOptimizedGreedyTests(unittest.TestCase):
         # The original stores marginal gains as FP32 irrespective of inputs;
         # the optimized interface preserves this diagnostic dtype too.
         expected = greedy_direct_cover(case[0], case[1], 13, *case[2:])
-        for backend in BACKENDS:
+        for backend in CPU_BACKENDS:
             actual = greedy_direct_cover_optimized(case[0], case[1], 13, *case[2:], backend=backend)
             torch.testing.assert_close(actual[0], expected[0], atol=0, rtol=0)
             torch.testing.assert_close(actual[1], expected[1], atol=0, rtol=0)

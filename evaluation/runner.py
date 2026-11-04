@@ -50,6 +50,7 @@ RESUME_KEYS = (
     "diagnostics",
     "seed",
     "verify_candidates",
+    "cancellation_recovery",
 )
 
 
@@ -61,7 +62,12 @@ def _validate_resume_config(source, args):
     cfg = vars(args) if not isinstance(args, dict) else args
     path = Path(source).with_name("config.json")
     previous = json.loads(path.read_text(encoding="utf-8"))
-    mismatches = [key for key in RESUME_KEYS if previous.get(key) != cfg.get(key)]
+    defaults = {"cancellation_recovery": "deferred"}
+    mismatches = [
+        key
+        for key in RESUME_KEYS
+        if previous.get(key, defaults.get(key)) != cfg.get(key, defaults.get(key))
+    ]
     if mismatches:
         raise ValueError("Resume configuration differs: " + ", ".join(mismatches))
 

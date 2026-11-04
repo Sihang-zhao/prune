@@ -38,6 +38,30 @@ def _rectangle(
     return attention, output
 
 
+def _repair_inline(
+    error_squared: torch.Tensor,
+    suspicious: torch.Tensor,
+    unsafe: torch.Tensor,
+    grouped_attention: torch.Tensor,
+    output: torch.Tensor,
+    value_groups: torch.Tensor,
+) -> int:
+    """Re-evaluate flagged readouts while their full attention is available."""
+    positions = (suspicious & ~unsafe).nonzero(as_tuple=False)
+    count = int(positions.shape[0])
+    # Only the sparse readout vectors are materialized. Dynamic nonzero can
+    # synchronize CUDA once per query chunk; no model/QK/AV replay is needed.
+    for begin in range(0, count, 16384):
+        head, query, group = positions[begin : begin + 16384].unbind(1)
+        local_attention = grouped_attention[head, query, group]
+        source = value_groups[head, group]
+        mass = local_attention.sum(-1)
+        readout = torch.bmm(local_attention.unsqueeze(1), source).squeeze(1)
+        error = (readout - mass[:, None] * output[head, query]) / (1.0 - mass)[:, None]
+        error_squared[head, query, group] = error.square().sum(-1)
+    return count
+
+
 @torch.no_grad()
 def group_deletion_statistics_optimized(
     q: torch.Tensor,
@@ -55,16 +79,22 @@ def group_deletion_statistics_optimized(
     near_one_threshold: float = 1e-5,
     max_attention_mb: float = 512.0,
     cancellation_threshold: float = 1e-3,
+    cancellation_recovery: str = "deferred",
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
     """Compute the reference score/support with one full-source QK per chunk.
 
     ``max_attention_mb`` bounds one [heads,query_chunk,raw_source] FP32
     rectangle. It is not a claim about total workspace, which has several
     such bounded temporaries. ``group_chunk_size`` applies to rare direct
-    cancellation recovery; normal Gram scoring is vectorized across groups.
+    deferred cancellation recovery; normal Gram scoring is vectorized across groups.
     ``source_chunk_size`` applies to the rare stable masked-source rescans.
     All legal Key rows share one softmax denominator. No N x N matrix or
     all-group hidden-vector difference tensor is constructed.
+
+    ``inline`` repairs only ill-conditioned raw-query/head/group tuples
+    before reducing the current chunk. ``deferred`` retains the original
+    whole-group rescoring pass. Both use the same direct readout formula;
+    near-unit attention mass always uses independently masked attention.
     """
     raw, heads, dim, groups = _validate_attention(
         q,
@@ -90,6 +120,8 @@ def group_deletion_statistics_optimized(
         raise ValueError("near_one_threshold must be in (0,1)")
     if not 0 < float(cancellation_threshold) < 1:
         raise ValueError("cancellation_threshold must be in (0,1)")
+    if cancellation_recovery not in {"deferred", "inline"}:
+        raise ValueError("cancellation_recovery must be deferred or inline")
     if groups <= 1:
         raise ValueError("deletion statistics need at least two source groups")
     unit = int(merge_unit)
@@ -123,6 +155,7 @@ def group_deletion_statistics_optimized(
     support = torch.zeros_like(scores)
     near_one = torch.zeros(groups, dtype=torch.bool, device=q.device)
     cancellation = torch.zeros_like(near_one)
+    inline_tuples = 0
     for start in range(0, raw_queries.numel(), chunk):
         ids = raw_queries[start : start + chunk]
         local_q = query_heads.index_select(1, ids).float().contiguous()
@@ -164,18 +197,22 @@ def group_deletion_statistics_optimized(
         denominator = torch.where(unsafe, torch.ones_like(remaining), remaining)
         error_squared = numerator.clamp_min(0).div_(denominator.square())
         error_squared.masked_fill_(unsafe | suspicious, 0.0)
+        if cancellation_recovery == "inline":
+            inline_tuples += _repair_inline(
+                error_squared, suspicious, unsafe, grouped_attention, output, value_groups
+            )
         local_weight = weights[start : start + local_count]
         scores.add_((error_squared.mean(0) * local_weight[:, None]).sum(0))
         support.add_((mass.mean(0) * local_weight[:, None]).sum(0))
         del attention, grouped_attention, mass, output, b_squared, cross
         del output_squared, output_term, numerator, magnitude, suspicious
         del remaining, unsafe, denominator, error_squared
-    # Exactly one small flags transfer after all ordinary GPU chunks; there
-    # is no Python decision or CPU synchronization within the normal loop.
+    # Deferred recovery transfers only these small flags after the main scan.
+    # Inline recovery also resolves sparse tuple counts in each query chunk.
     flags = torch.stack((near_one, cancellation & ~near_one)).detach().cpu()
     near_ids = flags[0].nonzero(as_tuple=False).flatten().tolist()
     cancel_ids = flags[1].nonzero(as_tuple=False).flatten().tolist()
-    if cancel_ids:
+    if cancel_ids and cancellation_recovery == "deferred":
         cancel_groups = torch.tensor(cancel_ids, dtype=torch.long, device=q.device)
         recovered = torch.zeros(len(cancel_ids), dtype=torch.float32, device=q.device)
         for start in range(0, raw_queries.numel(), chunk):
@@ -247,9 +284,11 @@ def group_deletion_statistics_optimized(
     ordinary_flops += 2 * heads * queries * groups * unit * unit
     ordinary_flops += heads * queries * (8 * raw + 21 * groups)
     recovery_flops = 0
-    if cancel_ids:
+    if cancel_ids and cancellation_recovery == "deferred":
         recovery_flops += 4 * heads * queries * raw * dim
         recovery_flops += len(cancel_ids) * heads * queries * (2 * unit * dim + 8 * dim + 8)
+    elif cancellation_recovery == "inline":
+        recovery_flops += inline_tuples * (2 * unit * dim + 8 * dim + 8)
     recovery_flops += len(near_ids) * heads * queries * raw * (8 * dim + 18)
     return (
         scores,
@@ -267,9 +306,21 @@ def group_deletion_statistics_optimized(
             "query_chunk_effective": chunk,
             "query_chunk_count": math.ceil(queries / chunk),
             "max_attention_mb": float(max_attention_mb),
-            "group_chunk_setting_used_for": "rare direct-vector cancellation recovery only; ordinary Gram scoring is vectorized across groups",
+            "group_chunk_setting_used_for": (
+                "unused by inline sparse recovery; readout tuple batches are bounded at 16384"
+                if cancellation_recovery == "inline"
+                else "rare direct-vector cancellation recovery only; ordinary Gram scoring is vectorized across groups"
+            ),
             "source_chunk_setting_used_for": "rare stable independently masked attention recovery only",
             "ordinary_qk_source_scans": 1,
+            "cancellation_recovery": cancellation_recovery,
+            "cancellation_qk_source_scans": int(
+                bool(cancel_ids) and cancellation_recovery == "deferred"
+            ),
+            "inline_recovered_tuple_count": inline_tuples,
+            "inline_readout_tuple_chunk_limit": (
+                16384 if cancellation_recovery == "inline" else None
+            ),
             "value_centering": "per-head source mean; exact common-translation identity",
             "stable_recomputed_group_ids": near_ids,
             "cancellation_recomputed_group_ids": cancel_ids,
@@ -277,7 +328,7 @@ def group_deletion_statistics_optimized(
             "statistics_dtype": "float32",
             "error_definition": "pi-weighted mean raw-query mean-head squared pre-output-projection readout difference",
             "attention_flops_estimated": int(ordinary_flops + recovery_flops),
-            "flops_note": "Partial analytical scalar-operation estimate. Counts one QK scan, AV, oV, per-group Value Gram, Gram/a products, estimated normalization/reductions, and triggered direct/masked recoveries. Excludes some reductions/index checks, allocation, transfers, memory traffic and launches; not measured hardware FLOPs.",
+            "flops_note": "Partial analytical scalar-operation estimate. Counts one QK scan, AV, oV, per-group Value Gram, Gram/a products, estimated normalization/reductions, and executed direct/masked recoveries. Inline cancellation repair reuses the current rectangle and counts only repaired readout tuples; deferred cancellation repair includes the repeated QK/AV scan. Excludes some reductions/index checks, allocation, transfers, memory traffic and launches; not measured hardware FLOPs.",
         },
     )
 

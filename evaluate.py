@@ -56,8 +56,14 @@ def get_args(argv=None):
     parser.add_argument("--source-chunk-size", type=int, default=256)
     parser.add_argument("--max-attention-mb", type=float, default=512.0)
     parser.add_argument(
+        "--cancellation-recovery",
+        choices=("deferred", "inline"),
+        default="deferred",
+        help="Repair numerical cancellation using the current attention chunk",
+    )
+    parser.add_argument(
         "--greedy-backend",
-        choices=("reference", "local_refresh", "scripted_local_refresh"),
+        choices=("reference", "local_refresh", "scripted_local_refresh", "cuda_fused"),
         default="reference",
     )
     parser.add_argument("--diagnostics", choices=("summary", "full"), default="summary")
@@ -73,6 +79,10 @@ def get_args(argv=None):
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--resume-from", default=None)
     args = parser.parse_args(argv)
+    if (args.implementation != "optimized" or args.method == "base") and (
+        args.cancellation_recovery != "deferred" or args.greedy_backend == "cuda_fused"
+    ):
+        parser.error("inline recovery and cuda_fused require optimized perturbation/nocover")
     if args.layer < 2:
         parser.error("--layer must be at least 2")
     if args.method == "base":
@@ -104,6 +114,8 @@ def get_args(argv=None):
         parser.error("--keep-tokens must be positive")
     if min(args.local_radius, args.warmup_cases, args.verify_candidates, args.worker_cases) < 0:
         parser.error("radius, warmup, verification and worker counts must be nonnegative")
+    if args.greedy_backend == "cuda_fused" and args.local_radius > 2:
+        parser.error("cuda_fused supports --local-radius 0, 1 or 2")
     if not math.isfinite(args.temperature) or args.temperature <= 0:
         parser.error("--temperature must be positive and finite")
     if not math.isfinite(args.perturbation_lambda) or args.perturbation_lambda < 0:

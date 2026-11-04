@@ -69,6 +69,7 @@ def build_runner(device, cfg):
         perturbation_selector_impl=cfg["implementation"],
         perturbation_max_attention_mb=cfg["max_attention_mb"],
         perturbation_greedy_backend=cfg["greedy_backend"],
+        perturbation_cancellation_recovery=cfg.get("cancellation_recovery", "deferred"),
     )
 
 
@@ -182,6 +183,8 @@ def make_record(output, case, cfg, model, device):
                 "cancellation_recomputed_group_ids",
                 "stable_recomputed_group_ids",
                 "statistics_implementation",
+                "cancellation_recovery",
+                "inline_recovered_tuple_count",
             )
             debug = [{key: view[key] for key in keys if key in view} for view in debug]
         record["pruning_diagnostics"] = debug

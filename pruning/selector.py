@@ -11,7 +11,7 @@ import torch
 from .common import SelectionResult, _stable_topk, _text_cosine
 from .reference import PERTURBATION_METHODS, _Stages, _finite, sparse_local_affinity
 from .statistics import group_deletion_statistics_optimized
-from .coverage import greedy_direct_cover_optimized
+from .coverage import BACKENDS, greedy_direct_cover_optimized
 
 
 @torch.no_grad()
@@ -39,6 +39,7 @@ def select_q_flowcover_perturbation_optimized_views(
     compare_flow: bool = False,
     max_attention_mb: float = 512.0,
     greedy_backend: str = "reference",
+    cancellation_recovery: str = "deferred",
 ) -> tuple[list[SelectionResult], list[dict[str, Any]]]:
     import math
 
@@ -61,8 +62,12 @@ def select_q_flowcover_perturbation_optimized_views(
         raise ValueError("temperature must be positive and lambda nonnegative, both finite")
     if local_radius < 0 or min(query_chunk_size, group_chunk_size, source_chunk_size) < 1:
         raise ValueError("invalid radius/chunk sizes")
-    if greedy_backend not in {"reference", "local_refresh", "scripted_local_refresh"}:
+    if greedy_backend not in BACKENDS:
         raise ValueError("unknown greedy backend; no fallback exists")
+    if greedy_backend == "cuda_fused" and local_radius > 2:
+        raise ValueError("cuda_fused supports local radius 0, 1 or 2")
+    if cancellation_recovery not in {"deferred", "inline"}:
+        raise ValueError("cancellation recovery must be deferred or inline")
     if not math.isfinite(max_attention_mb) or max_attention_mb <= 0:
         raise ValueError("attention memory budget must be finite and positive")
     results, records = [], []
@@ -118,6 +123,9 @@ def select_q_flowcover_perturbation_optimized_views(
             if q is None or k is None or v is None:
                 raise ValueError("nontrivial budgets require the actual native next-block Q/K/V")
             stages.begin("perturbation")
+            statistics_options = {}
+            if cancellation_recovery != "deferred":
+                statistics_options["cancellation_recovery"] = cancellation_recovery
             deletion, support, extra = group_deletion_statistics_optimized(
                 q,
                 k,
@@ -131,6 +139,7 @@ def select_q_flowcover_perturbation_optimized_views(
                 source_chunk_size=source_chunk_size,
                 max_attention_mb=max_attention_mb,
                 allowed_mask=None if allowed_masks is None else allowed_masks[view],
+                **statistics_options,
             )
             stages.end("perturbation")
             extra.update(statistics_computed=True, statistics_skipped=False)

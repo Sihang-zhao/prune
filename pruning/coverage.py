@@ -10,7 +10,7 @@ import torch
 from .reference import greedy_direct_cover as _reference
 
 
-BACKENDS = ("reference", "local_refresh", "scripted_local_refresh")
+BACKENDS = ("reference", "local_refresh", "scripted_local_refresh", "cuda_fused")
 
 
 def _local_loop(
@@ -162,7 +162,7 @@ def greedy_direct_cover_optimized(
     groups, degree = map(int, table.shape)
     affected_table = torch.empty((0, 0), dtype=torch.long, device=table.device)
     affected_slots = degree**2
-    if grid_shape is not None and backend != "reference":
+    if grid_shape is not None and backend in {"local_refresh", "scripted_local_refresh"}:
         height, width = map(int, grid_shape)
         radius = int(local_radius)
         if min(height, width) <= 0 or height * width != groups or radius < 0:
@@ -172,7 +172,7 @@ def greedy_direct_cover_optimized(
         affected_table = _grid_affected_table(height, width, radius, str(table.device))
         affected_slots = int(affected_table.shape[1])
     self_only = (
-        backend != "reference"
+        backend in {"local_refresh", "scripted_local_refresh"}
         and degree == 1
         and torch.equal(table[:, 0], torch.arange(groups, device=table.device))
     )
@@ -180,6 +180,22 @@ def greedy_direct_cover_optimized(
         chosen, gains = _reference(text_mass, residual_mass, int(keep), affinity, table, valid)
         implementation = "pruning.reference.greedy_direct_cover"
         affected_slots = 0  # Original backend refreshes all candidate rows.
+    elif backend == "cuda_fused":
+        from .cuda_coverage import greedy_direct_cover_cuda
+
+        chosen, gains = greedy_direct_cover_cuda(
+            text_mass,
+            residual_mass,
+            int(keep),
+            affinity,
+            table,
+            valid,
+            grid_shape=grid_shape,
+            local_radius=local_radius,
+        )
+        implementation = "pruning.cuda_coverage.greedy_direct_cover_cuda"
+        logical_slots = (4 * int(local_radius) + 1) ** 2 if grid_shape is not None else 0
+        affected_slots = 1 << (logical_slots - 1).bit_length() if logical_slots else 0
     elif self_only:
         score = text_mass + residual_mass * affinity[:, 0].clamp_min(0).masked_fill(~valid[:, 0], 0)
         order = torch.argsort(score, descending=True, stable=True)[: int(keep)]
@@ -205,7 +221,7 @@ def greedy_direct_cover_optimized(
     refresh_rounds = 0 if self_only else max(0, int(keep) - 1)
     candidate_edge_visits = (
         int(keep) * groups * degree
-        if backend == "reference"
+        if backend == "reference" or (backend == "cuda_fused" and grid_shape is None)
         else groups if self_only else groups * degree + refresh_rounds * affected_slots * degree
     )
     argmax_comparisons = 0 if self_only else int(keep) * max(0, groups - 1)
@@ -216,6 +232,9 @@ def greedy_direct_cover_optimized(
         "greedy_tie_break": "smallest_original_group_id",
         "greedy_local_slots_per_candidate": degree,
         "greedy_affected_candidate_slots": affected_slots,
+        "greedy_affected_logical_candidate_slots": (
+            logical_slots if backend == "cuda_fused" else affected_slots
+        ),
         "greedy_cached_grid_shape": (
             list(grid_shape) if grid_shape is not None and backend != "reference" else None
         ),
@@ -227,25 +246,39 @@ def greedy_direct_cover_optimized(
         "estimated_argmax_comparisons": argmax_comparisons,
         "estimated_flops_note": (
             "Partial analytical estimate: five scalar operations per visited local evidence slot; "
-            "argmax comparisons are listed separately. Does not count index/sort comparisons, "
+            "CUDA local refresh counts power-of-two padded candidate rows. Logical argmax "
+            "comparisons are listed separately, excluding additional tie-breaking reductions. "
+            "Does not count index/sort comparisons, "
             "all scatter updates, memory traffic, allocation or kernel dispatch."
         ),
         "greedy_sequential_rounds": 0 if self_only else int(keep),
         "greedy_modular_self_only": self_only,
         "greedy_cross_sample_tensor_cache": False,
+        "greedy_cuda_persistent": backend == "cuda_fused",
+        "greedy_numerics": (
+            "FP32 with fusion disabled; reduction order may differ slightly from ATen"
+            if backend == "cuda_fused"
+            else "ATen FP32 reductions"
+        ),
         "greedy_cost_note": (
-            (
-                "Unchanged reference full-refresh greedy: K rounds, N candidate gains per round, "
-                "d local evidence slots per candidate, O(K*N*d). No 2R graph build or local "
-                "refresh is executed in this backend."
-            )
-            if backend == "reference"
+            "Persistent CUDA greedy: K sequential argmax decisions within one kernel; "
+            "initial O(N*d), then (4R+1)^2*d local edge refreshes per round when a grid "
+            "is supplied, otherwise N*d full refreshes. No per-round host launches."
+            if backend == "cuda_fused"
             else (
-                "Exact local refresh: initial O(N*d), K argmax scans O(K*N), and "
-                "K*d^3 edge refreshes for generic graphs, or K*(4R+1)^2*d "
-                "with an explicitly supplied grid and cached integer 2R neighborhoods; "
-                "no dense N*N similarity and no per-round CPU scalar synchronization. "
-                "Scripted backend still launches ATen GPU operations; no GPU speedup is assumed."
+                (
+                    "Unchanged reference full-refresh greedy: K rounds, N candidate gains per round, "
+                    "d local evidence slots per candidate, O(K*N*d). No 2R graph build or local "
+                    "refresh is executed in this backend."
+                )
+                if backend == "reference"
+                else (
+                    "Exact local refresh: initial O(N*d), K argmax scans O(K*N), and "
+                    "K*d^3 edge refreshes for generic graphs, or K*(4R+1)^2*d "
+                    "with an explicitly supplied grid and cached integer 2R neighborhoods; "
+                    "no dense N*N similarity and no per-round CPU scalar synchronization. "
+                    "Scripted backend still launches ATen GPU operations; no GPU speedup is assumed."
+                )
             )
         ),
     }

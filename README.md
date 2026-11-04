@@ -41,6 +41,17 @@ bash scripts/run_sweep.sh "$DATA" "$MODEL" 0 outputs/perturbation 18
 
 默认 bf16、4M 像素、单视图、最多 32 个输出 token。`--layer L` 在第 L 层评分，读取原生第 L+1 层 Q/K/V，完成该层后裁剪；后续视觉层使用保留组。`--prune-percent` 是删除比例。`--method nocover` 为无局部覆盖对照，`--implementation reference` 使用参考统计。
 
+## CUDA 加速
+
+CUDA/Triton 环境可在剪枝命令中增加 `--greedy-backend cuda_fused --cancellation-recovery inline`：将逐轮贪心放入持久 GPU kernel，并复用当前 attention 分块完成数值修复，保留全部查询、源 Key 与覆盖目标。融合贪心支持局部半径 0–2；FP32 归约顺序可能存在微小差别。加速实验使用新的输出目录，避免混入旧耗时记录。
+
+先用相同输入配对检查索引、答案和时间，编译与预热不计入测量：
+
+```bash
+python scripts/benchmark_speed.py --data "$DATA" --model "$MODEL" \
+  --layer 18 --prune-percent 70 --cases 3
+```
+
 ## 方法与结果
 
 文本 Top-K 作为查询集合，全部查询对完整源 Key 归一化。计算各原始查询/head 的组删除 readout 差值平方范数后，再按问题权重聚合。查询集合内的扰动权重置零，用非负局部余弦图逐轮选择文本概率与新增残差覆盖收益最大的组，保留恰好 K 个完整组。

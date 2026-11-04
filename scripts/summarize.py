@@ -44,6 +44,7 @@ def summarize(input_root, output_prefix):
         "source_chunk_size",
         "max_attention_mb",
         "greedy_backend",
+        "cancellation_recovery",
         "seed",
     )
     for path in Path(input_root).expanduser().rglob("config.json"):
@@ -56,7 +57,15 @@ def summarize(input_root, output_prefix):
             continue
         if not report.get("total") or report["total"] != config.get("case_count"):
             continue
-        profiles.add(json.dumps({key: config.get(key) for key in profile_keys}, sort_keys=True))
+        profiles.add(
+            json.dumps(
+                {
+                    key: config.get(key, "deferred" if key == "cancellation_recovery" else None)
+                    for key in profile_keys
+                },
+                sort_keys=True,
+            )
+        )
         key = (
             config["method"],
             config["implementation"],
