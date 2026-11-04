@@ -263,6 +263,8 @@ def _run_parallel(
     from utils.data import case_dict
     if getattr(args, "evaluation_variant", None) == "perturbation":
         from compression.perturbation_worker import worker
+    elif getattr(args, "evaluation_variant", None) == "base":
+        from compression.base_worker import worker
     else:
         from compression.worker import worker
 
@@ -515,6 +517,10 @@ def _validate_resume_config(source: Path, args: argparse.Namespace) -> None:
         defaults = {"selector_impl": "reference", "max_attention_mb": 512., "greedy_backend": "reference"}
         mismatches.extend(key for key, default in defaults.items()
                           if previous.get(key, default) != getattr(args, key, default))
+    if getattr(args, "evaluation_variant", None) == "base":
+        for key in ("flops_accounting", "visual_pruning", "warmup_cases"):
+            if previous.get(key) != getattr(args, key, None):
+                mismatches.append(key)
     if mismatches:
         raise ValueError("Resume settings differ for: " + ", ".join(mismatches) + "; use a matching run or start a new run")
 
@@ -623,12 +629,23 @@ def test(args: argparse.Namespace) -> dict[str, Any]:
         retained_values = [int(row.get("retained_tokens", 0) or 0) for row in rows]
         retention_ratios = [float(row.get("retention_ratio", 0.0) or 0.0) for row in rows if row.get("status") != "error"]
         pruning_values = [float(row.get("pruning_latency", 0.0) or 0.0) for row in rows if row.get("status") != "error"]
-        prefill_values = [float(row.get("prefill_latency", 0.0) or 0.0) for row in rows]
+        prefill_values = [float(row["prefill_latency"]) for row in rows if row.get("prefill_latency") is not None]
         summary["retained_tokens"] = sum(retained_values)
         summary["avg_retained_tokens"] = sum(retained_values) / len(retained_values) if retained_values else 0.0
         summary["avg_retention_ratio"] = sum(retention_ratios) / len(retention_ratios) if retention_ratios else 0.0
         summary["avg_pruning_latency"] = sum(pruning_values) / len(pruning_values) if pruning_values else 0.0
-        summary["avg_prefill_latency"] = sum(prefill_values) / len(prefill_values) if prefill_values else 0.0
+        summary["avg_prefill_latency"] = sum(prefill_values) / len(prefill_values) if prefill_values else None
+        measured_breakdowns = [row["flops_breakdown"] for row in rows
+                               if row.get("status") != "error" and isinstance(row.get("flops_breakdown"), dict)]
+        if measured_breakdowns:
+            component_keys = set.intersection(*(set(row) for row in measured_breakdowns))
+            summary["avg_flops_breakdown"] = {
+                key: sum(float(row[key]) for row in measured_breakdowns) / len(measured_breakdowns)
+                for key in sorted(component_keys)
+            }
+            summary["flops_accounting"] = getattr(args, "flops_accounting", None)
+            summary["flops_note"] = next((row.get("flops_note") for row in rows if row.get("flops_note")),
+                                         "Partial analytical operation estimate; not a hardware profiler measurement.")
         summary["total_test_time"] = time.perf_counter() - run_started
         _write_json(run_dir / "summary.json", summary)
         # save_markdown predates fixed-K pruning and only uses this value for a
@@ -646,7 +663,8 @@ def test(args: argparse.Namespace) -> dict[str, Any]:
             if args.visual_keep_tokens is None
             else f"fixed K={args.visual_keep_tokens} per view"
         )
-        pruning_label = f"{args.prune_method}; {args.compression_mode}; layer {args.pruning_layer}; {budget_label}"
+        pruning_label = (f"{args.prune_method}; {args.compression_mode}; layer {args.pruning_layer}; {budget_label}"
+                         if args.visual_pruning else "Qwen3-VL-8B base; no pruning; current FLOPs accounting")
         markdown_text = markdown_path.read_text(encoding="utf-8")
         method_start = markdown_text.find("<tbody>\n<tr><td>")
         if method_start >= 0:
@@ -659,6 +677,20 @@ def test(args: argparse.Namespace) -> dict[str, Any]:
                     + markdown_text[method_end:]
                 )
         markdown_path.write_text(markdown_text, encoding="utf-8")
+        if summary.get("avg_flops_breakdown"):
+            components = summary["avg_flops_breakdown"]
+            labels = (("LLM", "llm_flops"), ("ViT linear projections / MLP", "vision_linear_flops"),
+                      ("ViT attention QK / AV", "vision_attention_flops"),
+                      ("Final merger", "final_merger_flops"), ("DeepStack mergers", "deepstack_mergers_flops"),
+                      ("Extra score merger", "score_merger_flops"), ("Selector", "selector_flops"),
+                      ("Total", "estimated_total_flops"))
+            details = "\n\nFLOPs use the current raw-patch / attention / native-merger convention.\n\n| Component | Average TFLOPs / case |\n|---|---:|\n"
+            details += "\n".join(f"| {label} | {components[key] / 1e12:.6f} |" for label, key in labels if key in components)
+            details += "\n\n" + str(summary.get("flops_note", "")) + "\n"
+            if not prefill_values:
+                details += "\nNative baseline prefill is not timed separately; time covers visual encoding through answer decoding.\n"
+            with markdown_path.open("a", encoding="utf-8") as handle:
+                handle.write(details)
         logger.write(
             f"overall micro AC: {summary['micro_acc']:.4f}; "
             f"macro task AC: {summary['macro_acc']:.4f} "
@@ -667,7 +699,8 @@ def test(args: argparse.Namespace) -> dict[str, Any]:
         logger.write(f"retained tokens: total={summary['retained_tokens']} avg={summary['avg_retained_tokens']:.2f}")
         logger.write(f"retention ratio: avg={summary['avg_retention_ratio']:.4f}")
         logger.write(f"pruning latency: avg={summary['avg_pruning_latency']:.4f}s")
-        logger.write(f"prefill latency: avg={summary['avg_prefill_latency']:.4f}s")
+        logger.write(f"prefill latency: avg={summary['avg_prefill_latency']:.4f}s"
+                     if summary["avg_prefill_latency"] is not None else "prefill latency: not measured separately")
         logger.write(f"avg testtime: {summary['avg_testtime']:.4f}s avg estimated TFLOPs: {summary['avg_tflops']:.6f} total estimated TFLOPs: {summary['total_tflops']:.6f}")
         for name, value in summary["taskL3"].items():
             logger.write(f"taskL3 {name}: {value['acc']:.4f} ({value['correct']}/{value['total']})")
