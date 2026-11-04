@@ -261,7 +261,10 @@ def _run_parallel(
     if not cases:
         return []
     from utils.data import case_dict
-    from compression.worker import worker
+    if getattr(args, "evaluation_variant", None) == "perturbation":
+        from compression.perturbation_worker import worker
+    else:
+        from compression.worker import worker
 
     context = mp.get_context("spawn")
     output_path = Path(args.output)
@@ -436,7 +439,16 @@ def _resume_source(args: argparse.Namespace) -> Path | None:
         return Path(args.resume_from).expanduser()
     if not args.resume:
         return None
-    candidates = sorted(Path(args.output_dir).expanduser().glob("*/results.jsonl"), key=lambda path: path.stat().st_mtime)
+    def checkpoint_order(path: Path) -> tuple[Any, ...]:
+        # Rapid interrupted runs can share a coarse filesystem timestamp.
+        # Numeric suffixes retain creation order even beyond _99; arbitrary
+        # old folder labels must not win a tie over timestamped run folders.
+        parts = path.parent.name.split("_")
+        run_order = tuple(int(part) for part in parts) if all(part.isdigit() for part in parts) else ()
+        return (path.stat().st_mtime_ns, path.parent.stat().st_mtime_ns,
+                run_order, path.parent.name)
+
+    candidates = sorted(Path(args.output_dir).expanduser().glob("*/results.jsonl"), key=checkpoint_order)
     return candidates[-1] if candidates else None
 
 
@@ -481,6 +493,8 @@ def _validate_resume_config(source: Path, args: argparse.Namespace) -> None:
     if not config_path.is_file():
         raise ValueError(f"Cannot verify resume settings: missing {config_path}")
     previous = json.loads(config_path.read_text(encoding="utf-8"))
+    if previous.get("evaluation_variant") != getattr(args, "evaluation_variant", None):
+        raise ValueError("Resume settings differ for: evaluation_variant; do not mix independent experiment entry points")
     keys = (
         "data", "image_root", "split", "model", "dtype", "prune_method", "compression_mode",
         "visual_keep_ratio", "visual_keep_tokens", "pruning_layer", "q_flowcover_radius",
@@ -490,7 +504,17 @@ def _validate_resume_config(source: Path, args: argparse.Namespace) -> None:
         "max_image_patches", "patch_selection", "include_global_view", "tile_single_images",
         "patch_size", "patch_stride", "global_view_size", "enable_thinking", "max_new_tokens",
     )
+    if getattr(args, "evaluation_variant", None) == "perturbation":
+        keys += (
+            "evaluation_variant", "temperature", "perturbation_lambda", "local_radius",
+            "query_chunk_size", "group_chunk_size", "source_chunk_size", "seed",
+            "save_diagnostics", "verify_candidates", "warmup_cases",
+        )
     mismatches = [key for key in keys if key not in previous or previous[key] != getattr(args, key)]
+    if getattr(args, "evaluation_variant", None) == "perturbation":
+        defaults = {"selector_impl": "reference", "max_attention_mb": 512., "greedy_backend": "reference"}
+        mismatches.extend(key for key, default in defaults.items()
+                          if previous.get(key, default) != getattr(args, key, default))
     if mismatches:
         raise ValueError("Resume settings differ for: " + ", ".join(mismatches) + "; use a matching run or start a new run")
 

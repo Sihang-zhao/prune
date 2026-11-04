@@ -1,0 +1,92 @@
+{
+  "validation_date": "2026-11-04",
+  "algorithm_id": "q_flowcover_perturbation",
+  "selector_impl": "optimized",
+  "greedy_backend": "reference",
+  "model": "Qwen3-VL-8B",
+  "dataset": "XLRS-Bench-lite-subdata-20",
+  "dataset_split": "train",
+  "runtime": {
+    "gpu": "NVIDIA H200 NVL",
+    "torch": "2.14.1+cu126",
+    "model_dtype": "torch.bfloat16",
+    "statistics_dtype": "float32",
+    "tf32_enabled": false,
+    "gpu_shared_with_existing_processes": true
+  },
+  "configuration": {
+    "score_layer_human": 18,
+    "perturbation_layer_human": 19,
+    "gather_after_layer_human": 19,
+    "exec_mode": "full19_gather",
+    "removed_percent": 50,
+    "max_image_patches": 1,
+    "max_image_pixels": 4194304,
+    "max_new_tokens": 32,
+    "query_chunk_size": 256,
+    "group_chunk_size": 32,
+    "source_chunk_size": 256,
+    "max_attention_mb": 512,
+    "temperature": 1.0,
+    "perturbation_lambda": 1.0,
+    "local_radius": 1,
+    "all_budget_topk_queries_preserved": true,
+    "extra_diagnostic_flow_comparison": false,
+    "explicit_deletion_debug_verification_in_timing": false
+  },
+  "full_subset": {
+    "dataset_cases": 260,
+    "errors": 0,
+    "mean_inference_seconds": 0.9944002868133024,
+    "median_inference_seconds": 0.9060294234659523,
+    "p95_inference_seconds": 1.7839610639493912,
+    "mean_visual_encoding_and_pruning_seconds": 0.852387060800818,
+    "max_peak_memory_bytes": 19248114688,
+    "correct": 133,
+    "macro_accuracy": 0.5115384615384616,
+    "entire_test_wall_seconds": 440.579133160878
+  },
+  "paired_same_input_13_cases": {
+    "case_count": 13,
+    "all_keep_idx_equal": true,
+    "all_answers_equal": true,
+    "reference": {
+      "mean_inference_seconds": 2.513166296492832,
+      "median_inference_seconds": 2.5785819988232106,
+      "mean_perturbation_seconds": 1.8291516443215883,
+      "mean_greedy_seconds": 0.26425058298844556
+    },
+    "optimized": {
+      "mean_inference_seconds": 0.9200326040602074,
+      "median_inference_seconds": 0.8574880980886519,
+      "mean_perturbation_seconds": 0.27152011036872864,
+      "mean_greedy_seconds": 0.265589889893165
+    }
+  },
+  "existing_reference_comparison": {
+    "case_count": 23,
+    "all_keep_idx_equal": true,
+    "all_answers_equal": true
+  },
+  "tests_in_shared_workspace": {
+    "total_passed": 155,
+    "focused_optimized_tests_in_torch26_passed": 22
+  },
+  "provenance": {
+    "full_run_relative_dir": "outputs/q_flowcover_perturbation_optimized/L18/prune_50/1104_1223",
+    "paired_run_relative_dir": "outputs/perturbation_optimization/real_e2e_13",
+    "per_question_data_included": false
+  },
+  "limits": [
+    "Model inference timing follows the original evaluator: visual encoding through answer decode including selector/indexing/LLM; image I/O, processor preparation and model loading are outside this metric.",
+    "Whole-test wall time is reported separately. The 1.2-second target is an average, not a per-case deadline.",
+    "Every full-run case was not separately rerun with the reference; equivalence evidence is limited to the paired cases and available existing-reference cases.",
+    "FLOPs are partial analytical executed-shape estimates, not measured hardware counters."
+  ],
+  "publication_snapshot_tests": {
+    "passed": 138,
+    "errors": 0,
+    "environment": "Python 3.10 / PyTorch 2.6 CPU",
+    "scope": "isolated staged snapshot; no model downloads or uncommitted lite dependencies"
+  }
+}

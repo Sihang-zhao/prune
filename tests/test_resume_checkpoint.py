@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -74,6 +75,21 @@ def _row(index):
 
 
 class ResumeCheckpointTests(unittest.TestCase):
+    def test_equal_timestamps_choose_the_newest_numeric_run_suffix(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            names = ("1104_1200_100", "previous", "1104_1200_99", "1104_1200")
+            stamp = 1_700_000_000_000_000_000
+            for name in names:
+                folder = root / name
+                folder.mkdir()
+                path = folder / "results.jsonl"
+                save_jsonl(path, [_row(0)])
+                os.utime(path, ns=(stamp, stamp))
+                os.utime(folder, ns=(stamp, stamp))
+            args = SimpleNamespace(resume=True, resume_from=None, output_dir=root)
+            self.assertEqual(evaluator._resume_source(args), root / "1104_1200_100" / "results.jsonl")
+
     def test_repeated_interrupts_keep_all_old_and_new_successes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

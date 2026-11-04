@@ -160,3 +160,36 @@ python -m unittest discover -s tests -v
 `testn.py → evaluator.py → compression/worker.py → Qwen3VLCompressionRunner → q_flowcover_variants.py` 是新的独立调用链，不依赖旁边的原工程目录。共用模型封装保留了部分原有基础 helper；核心 `q_flowcover.py` 和 `q_flowcover_variants.py` 与原文件逐字节一致。
 
 详细追溯见 [SOURCE_MAP.md](SOURCE_MAP.md) 和 [source_manifest.json](source_manifest.json)。原结果未保存历史源码 commit，因此这里记录的是“实验配置与当前对应实现”的证据链。已去掉本机运行路径、无关实验入口及权重/数据/大日志；原结果目录保持不变。
+
+## Independent perturbation experiment
+
+The new [perturbation-guided selector and experiment documentation](docs/perturbation.md)
+uses `test_perturbation.py`. It leaves `testn.py` and the archived selector files
+unchanged. `full19_gather` is a relative execution mode: score at layer **l**,
+read native Q/K/V from **l+1**, finish **l+1**, then gather once. Changing
+`--decision-layer-human` changes all three boundaries consistently.
+
+Use `--selector_impl optimized --greedy_backend reference` to enable the
+equivalent rectangular/Value-Gram statistics implementation while retaining
+the exact original greedy objective. The default `reference` selector remains
+available. On the real H200 / Qwen3-VL-8B, the optimized 50% run completed all
+260 subset cases with zero runtime errors and **0.9944 s** average model
+inference time. This timing includes selection and generation; whole-test
+wall time, including loading and preparation, was 440.58 s.
+
+See [optimization and measured validation](docs/perturbation_optimization.md)
+for paired keep-index/answer checks, timing scope, and limitations, and
+[portable validation metrics](results/perturbation_validation.json) for the
+recorded aggregate results. The independent entry has four A/B/C/D modes:
+`text_cos`, `q_flowcover_direct_residual`, `q_flowcover_perturbation`, and
+`q_flowcover_perturbation_nocover`.
+
+```bash
+export DATA=/path/to/XLRS-Bench-lite-subdata-20
+export MODEL=/path/to/Qwen3-VL-8B
+bash scripts/run_perturbation_optimized_50_90.sh
+```
+
+The script runs 50/60/70/80/85/90% removal with optimized statistics; passing
+percentages as arguments runs only those budgets. Weights, datasets, image
+outputs and per-question results are not included in this repository.
