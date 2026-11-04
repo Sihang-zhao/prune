@@ -10,13 +10,14 @@ import os
 import queue
 import signal
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from utils.data import Case
-from utils.metrics import evaluate, load_jsonl, save_jsonl, save_markdown
+from utils.metrics import evaluate, load_jsonl, save_markdown
 
 
 DEFAULT_DATA = os.environ.get("XLRS_DATA_ROOT")
@@ -253,7 +254,10 @@ def _process_exit_detail(code: int) -> str:
     return f"{code} ({name})"
 
 
-def _run_parallel(cases: list[Case], args: argparse.Namespace, devices: list[str], logger: _RunLogger) -> list[dict[str, Any]]:
+def _run_parallel(
+    cases: list[Case], args: argparse.Namespace, devices: list[str], logger: _RunLogger,
+    *, append_checkpoint: bool = False,
+) -> list[dict[str, Any]]:
     if not cases:
         return []
     from utils.data import case_dict
@@ -262,7 +266,7 @@ def _run_parallel(cases: list[Case], args: argparse.Namespace, devices: list[str
     context = mp.get_context("spawn")
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    case_file = output_path.open("w", encoding="utf-8")
+    case_file = output_path.open("a" if append_checkpoint else "w", encoding="utf-8")
     rows: list[dict[str, Any]] = []
     completed = correct_count = error_count = 0
     requested_batch = int(getattr(args, "worker_cases", 128) or 0)
@@ -449,6 +453,29 @@ def _select_resume_cases(cases: list[Case], source: Path | None, logger: _RunLog
     return pending, [row for row in previous if int(row.get("index", -1)) in successful]
 
 
+def _seed_resume_checkpoint(output: str | Path, reused_rows: list[dict[str, Any]]) -> None:
+    """Publish old successes before inference so another interrupt keeps them.
+
+    Build the seed beside the final file and rename it only when complete.
+    An interrupt during the potentially large copy therefore leaves the last
+    usable results.jsonl as the resume source instead of a truncated seed.
+    """
+
+    destination = Path(output)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".resume_", suffix=".jsonl", dir=destination.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            for row in reused_rows:
+                handle.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _validate_resume_config(source: Path, args: argparse.Namespace) -> None:
     config_path = source.parent / "config.json"
     if not config_path.is_file():
@@ -551,19 +578,14 @@ def test(args: argparse.Namespace) -> dict[str, Any]:
         if resume_source is not None:
             _validate_resume_config(resume_source, args)
         active_cases, reused_rows = _select_resume_cases(cases, resume_source, logger, bool(args.resume or args.resume_from))
-        generated_rows = _run_parallel(active_cases, args, devices, logger)
+        if resume_source is not None:
+            _seed_resume_checkpoint(args.output, reused_rows)
+        generated_rows = _run_parallel(
+            active_cases, args, devices, logger,
+            append_checkpoint=resume_source is not None,
+        )
         rows = reused_rows + generated_rows
         rows = sorted({int(row.get("index", -1)): row for row in rows}.values(), key=lambda row: int(row.get("index", 0)))
-        if resume_source is not None:
-            # _run_parallel writes full pruning metadata for active cases, but
-            # keeps a compact in-memory row.  Rebuild the checkpoint from the
-            # on-disk full rows so a second resume never loses selection data.
-            generated_disk = load_jsonl(args.output) if Path(args.output).is_file() else []
-            merged_disk = sorted(
-                {int(row.get("index", -1)): row for row in reused_rows + generated_disk}.values(),
-                key=lambda row: int(row.get("index", 0)),
-            )
-            save_jsonl(args.output, merged_disk)
         _check_pruning_rows(rows, args, devices, logger)
         # _run_parallel already streamed the complete rows (including full
         # pruning metadata) to the run JSONL.  The in-memory rows are compact

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
+import hashlib
 import html
 import io
 import json
@@ -314,7 +316,71 @@ def _atomic_write(path: Path, content: str) -> None:
             temporary.unlink()
 
 
-def write_report(report: dict[str, Any], output_prefix: str | Path) -> dict[str, str]:
+def _preserve_report(report: dict[str, Any], previous: dict[str, Any]) -> None:
+    """Keep completed cells when current roots only contain part of a sweep."""
+    if not isinstance(previous.get("rows"), list):
+        raise ValueError("Existing summary JSON has no valid rows; it was left unchanged")
+    completed = [row for row in previous["rows"] if row.get("status") in {"completed", "completed_with_errors"}]
+    if not completed:
+        return
+    mismatches = [key for key in ("method", "exec_mode") if report.get(key) != previous.get(key)]
+    old_profile, new_profile = previous.get("profile"), report.get("profile")
+    if not isinstance(old_profile, dict):
+        raise ValueError("Cannot verify the experiment profile of the existing completed summary; it was left unchanged")
+    if isinstance(new_profile, dict):
+        mismatches.extend(key for key in old_profile.keys() | new_profile.keys()
+                          if old_profile.get(key) != new_profile.get(key))
+    else:
+        # No newly completed runs: explicit filters are recorded on pending
+        # rows, and must still agree with the already completed experiment.
+        for row in report["rows"]:
+            for field, profile_key in (("dataset", "data"), ("model", "model")):
+                if row.get(field) is not None and row[field] != old_profile.get(profile_key):
+                    mismatches.append(profile_key)
+            if row.get("dtype") is not None and row["dtype"].split(",") != old_profile.get("dtype"):
+                mismatches.append("dtype")
+    if mismatches:
+        raise ValueError("Existing summary has a different experiment profile (" + ", ".join(sorted(set(mismatches)))
+                         + "); previous tables were left unchanged. Choose a separate output prefix.")
+    rows = {(row["layer"], row["prune_percent"]): row for row in report["rows"]}
+    kept = 0
+    for row in completed:
+        key = (row["layer"], row["prune_percent"])
+        if key not in rows or rows[key].get("status") == "pending":
+            rows[key] = copy.deepcopy(row)
+            kept += 1
+    report["rows"] = [rows[key] for key in sorted(rows)]
+    report["layers"] = sorted({row["layer"] for row in report["rows"]})
+    report["prune_percents"] = sorted({row["prune_percent"] for row in report["rows"]})
+    report["expected_count"] = len(rows)
+    report["completed_count"] = sum(row["status"] != "pending" for row in report["rows"])
+    if report.get("profile") is None:
+        report["profile"] = copy.deepcopy(old_profile)
+    # Retain provenance for old cells when a wrapper only passes its newly
+    # active root; the snapshot remains usable after source directories move.
+    report["input_roots"] = sorted(set(report.get("input_roots", [])) | set(previous.get("input_roots", [])))
+    if kept:
+        report["warnings"].append(f"Preserved {kept} completed cells from the existing summary; no pending run replaced them.")
+
+
+def _backup_tables(paths: dict[str, Path], contents: dict[str, str]) -> None:
+    """Snapshot a changed table set once per content hash before replacing it."""
+    existing = {suffix: path.read_bytes() for suffix, path in paths.items() if path.is_file()}
+    if not existing or all(existing.get(suffix) == content.encode("utf-8") for suffix, content in contents.items()):
+        return
+    digest = hashlib.sha256()
+    for suffix, value in sorted(existing.items()):
+        digest.update(suffix.encode("ascii") + b"\0" + value)
+    prefix = paths["json"].with_suffix("")
+    backup = prefix.parent / "summary_history" / (prefix.name + "_" + digest.hexdigest()[:16])
+    backup.mkdir(parents=True, exist_ok=True)
+    for suffix, value in existing.items():
+        target = backup / paths[suffix].name
+        if not target.exists():
+            target.write_bytes(value)
+
+
+def write_report(report: dict[str, Any], output_prefix: str | Path, *, preserve_existing: bool = False) -> dict[str, str]:
     """Write CSV, two-level-header Markdown/HTML, and full provenance JSON."""
     prefix = Path(output_prefix).expanduser()
     paths = {suffix: Path(str(prefix) + "." + suffix) for suffix in ("csv", "md", "html", "json")}
@@ -322,6 +388,8 @@ def write_report(report: dict[str, Any], output_prefix: str | Path) -> dict[str,
         paths["json"].name in {"config.json", "summary.json"} or paths["md"].name == "results.md"
     ):
         raise ValueError("Output would overwrite an original run file; choose the sweep root or a different output prefix")
+    if preserve_existing and paths["json"].is_file():
+        _preserve_report(report, _read_object(paths["json"]))
     csv_text = io.StringIO(newline="")
     writer = csv.writer(csv_text, lineterminator="\n")
     writer.writerow(["Method", "Layer", "Prune%", *ALL_TASKS, "Avg.", "time (s)", "TFLOPs", "Status", "Cases", "Errors", "Source"])
@@ -361,8 +429,11 @@ def write_report(report: dict[str, Any], output_prefix: str | Path) -> dict[str,
         f"<h1>{heading}</h1><p>{progress}</p><div class=\"scroll\">{table}</div>"
         f'<p class="note">{html.escape(note)}</p>{warning_html}</body></html>\n'
     )
-    for suffix, content in {"csv": "\ufeff" + csv_text.getvalue(), "md": markdown, "html": html_text,
-                            "json": json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"}.items():
+    contents = {"csv": "\ufeff" + csv_text.getvalue(), "md": markdown, "html": html_text,
+                "json": json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"}
+    if preserve_existing:
+        _backup_tables(paths, contents)
+    for suffix, content in contents.items():
         _atomic_write(paths[suffix], content)
     return {suffix: str(path) for suffix, path in paths.items()}
 
@@ -371,6 +442,8 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-root", nargs="+", required=True, type=Path)
     parser.add_argument("--output-prefix", required=True, type=Path)
+    parser.add_argument("--preserve-existing", action="store_true",
+                        help="Preserve completed cells and snapshot changed table files before updating")
     parser.add_argument("--layers", nargs="+", type=int, default=DEFAULT_LAYERS)
     parser.add_argument("--prune-percents", nargs="+", type=float, default=DEFAULT_PRUNE_PERCENTS)
     parser.add_argument("--method", default=DEFAULT_METHOD)
@@ -382,7 +455,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     try:
         report = build_report(args.input_root, args.layers, args.prune_percents, args.method,
                               args.data, args.model, args.exec_mode, args.dtype)
-        paths = write_report(report, args.output_prefix)
+        paths = write_report(report, args.output_prefix, preserve_existing=args.preserve_existing)
     except (OSError, ValueError) as error:
         parser.error(str(error))
     print(f"Summary: {report['completed_count']}/{report['expected_count']} completed")

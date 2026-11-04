@@ -34,7 +34,8 @@ update_summary() {
     --data "$dataset_path" \
     --model "$model_path" \
     --exec-mode hard18 \
-    --dtype bf16; then
+    --dtype bf16 \
+    --preserve-existing; then
     echo "Summary update failed; run scripts/summarize_results.py again after checking its message. Benchmark results remain saved." >&2
   fi
 }
@@ -43,7 +44,7 @@ update_summary() {
 update_summary
 
 for prune_percent in 50 60 70 80 85 90 95 98; do
-  "$python_bin" "$project_root/testn.py" \
+  test_arguments=(
     --data "$dataset_path" \
     --model "$model_path" \
     --offline \
@@ -62,5 +63,26 @@ for prune_percent in 50 60 70 80 85 90 95 98; do
     --worker-cases 128 \
     --text-source baseline \
     --output-dir "$output_root/prune_${prune_percent}"
+  )
+  plan="$("$python_bin" "$project_root/scripts/sweep_state.py" "${test_arguments[@]}")"
+  IFS=$'\t' read -r action source <<< "$plan"
+  case "$action" in
+    skip)
+      echo "[SKIP] layer=$decision_layer prune=$prune_percent% already completed: $source"
+      continue
+      ;;
+    resume)
+      echo "[RESUME] layer=$decision_layer prune=$prune_percent% checkpoint: $source"
+      test_arguments+=(--resume-from "$source")
+      ;;
+    run)
+      echo "[RUN] layer=$decision_layer prune=$prune_percent%"
+      ;;
+    *)
+      echo "Unexpected sweep state: $plan" >&2
+      exit 1
+      ;;
+  esac
+  "$python_bin" "$project_root/testn.py" "${test_arguments[@]}"
   update_summary
 done

@@ -25,7 +25,7 @@ import subprocess
 import sys
 
 script, *arguments = sys.argv[1:]
-if Path(script).name == "summarize_results.py":
+if Path(script).name in {"summarize_results.py", "sweep_state.py"}:
     raise SystemExit(subprocess.call([sys.executable, "-S", script, *arguments]))
 if Path(script).name != "testn.py":
     raise SystemExit("Unexpected sweep command: " + script)
@@ -47,6 +47,7 @@ config = {
     "compression_mode": value("--exec-mode"), "dtype": value("--dtype"),
     "effective_dtypes": [value("--dtype")], "case_count": 26,
     "vision_layers": f"6,{layer},24",
+    "visual_pruning": True,
 }
 summary = {
     "total": 26, "correct": 13, "errors": 0, "macro_acc": 0.5,
@@ -62,7 +63,7 @@ with open(os.environ["QFLOW_TEST_CALLS"], "a", encoding="utf-8") as log:
 
 
 class SweepSummaryIntegrationTests(unittest.TestCase):
-    def _run_sweep(self, name: str, layer: int | None = None):
+    def _run_sweep(self, name: str, layer: int | None = None, skip_layers: str = ""):
         temporary = tempfile.TemporaryDirectory(prefix="qflow sweep summary ")
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -78,7 +79,7 @@ class SweepSummaryIntegrationTests(unittest.TestCase):
         environment = dict(os.environ)
         for key in ("QFLOW_SUMMARY_ROOT", "QFLOW_SUMMARY_LAYERS"):
             environment.pop(key, None)
-        environment.update(QFLOW_PYTHON=str(interpreter), QFLOW_TEST_CALLS=str(calls))
+        environment.update(QFLOW_PYTHON=str(interpreter), QFLOW_TEST_CALLS=str(calls), QFLOW_SKIP_LAYERS=skip_layers)
         command = [
             "bash", str(PROJECT_ROOT / "scripts" / name),
             str(dataset), str(model), "0,1", str(output),
@@ -90,6 +91,13 @@ class SweepSummaryIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertNotIn("Summary update failed", completed.stderr)
+        # Rerunning the exact same command must skip completed experiments.
+        repeated = subprocess.run(
+            command, cwd=root, env=environment, capture_output=True, text=True, timeout=45,
+        )
+        self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
+        self.assertNotIn("Summary update failed", repeated.stderr)
+        self.assertIn("[SKIP]", repeated.stdout)
         report = json.loads((output / "summary.json").read_text(encoding="utf-8"))
         with (output / "summary.csv").open(newline="", encoding="utf-8") as handle:
             csv_rows = list(csv.DictReader(handle))
@@ -97,7 +105,8 @@ class SweepSummaryIntegrationTests(unittest.TestCase):
         # The matrix must maintain one shared table set, not four independent
         # layer tables. Leaf summary.json files are the fake benchmark inputs.
         for suffix in ("json", "csv", "md", "html"):
-            tables = [path for path in output.rglob(f"summary.{suffix}") if path.parent.name != "fake_run"]
+            tables = [path for path in output.rglob(f"summary.{suffix}")
+                      if path.parent.name != "fake_run" and "summary_history" not in path.parts]
             self.assertEqual(tables, [output / f"summary.{suffix}"])
         self.assertEqual(report["warnings"], [])
         return output, report, csv_rows, evaluations
@@ -130,6 +139,14 @@ class SweepSummaryIntegrationTests(unittest.TestCase):
                 Path(row["output"]),
                 output / f"layer_{row['layer']}" / f"prune_{row['percent']}" / "fake_run",
             )
+
+    def test_skip_layer_18_retains_32_row_grid_without_running_layer_18(self):
+        output, report, csv_rows, evaluations = self._run_sweep("run_layer_pruning_sweep.sh", skip_layers="18")
+        self.assertEqual(report["expected_count"], 32)
+        self.assertEqual(report["completed_count"], 24)
+        self.assertEqual(len(evaluations), 24)
+        self.assertEqual({row["layer"] for row in evaluations}, {15, 16, 17})
+        self.assertTrue(all(row["status"] == "pending" for row in report["rows"] if row["layer"] == 18))
 
 
 if __name__ == "__main__":
