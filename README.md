@@ -1,61 +1,55 @@
-# Perturbation-guided Q-FlowCover
+# Qwen3 Perturbation Pruning
 
-面向 Qwen3-VL 的视觉 token 剪枝：结合问题相关性、组删除扰动与局部覆盖，保留固定数量的视觉组。支持参考实现和等价的优化实现。
+无需训练的 Qwen3-VL 视觉 token 剪枝。保留文本相关性、组删除扰动和局部覆盖逻辑；默认使用优化统计实现。
+
+```text
+evaluate.py       统一评测入口：扰动剪枝 / 原生 base
+pruning/          选择器、扰动统计与贪心覆盖
+models/           Qwen3-VL 接入、完整组裁剪和生成
+evaluation/       数据、推理进程、评分、续跑和 FLOPs
+scripts/          比例测试与结果总表
+tests/            数学、模型接入和评测测试
+```
 
 ## 安装
 
-Python 3.10 或更新版本；根据设备安装 PyTorch，然后安装依赖：
+Python 3.10；按设备安装 PyTorch，再安装依赖：
 
 ```bash
 pip install -r requirements.txt
-pip install -r requirements-data.txt
 ```
 
-## 扰动方法
+## 运行
 
 ```bash
 export DATA=/path/to/XLRS-Bench-lite
 export MODEL=/path/to/Qwen3-VL-8B
 
-python test_perturbation.py \
-  --data "$DATA" --model "$MODEL" --offline --gpus 0 --dtype bf16 \
-  --prune-method q_flowcover_perturbation --selector-impl optimized \
-  --greedy-backend reference --exec-mode full19_gather \
-  --decision-layer-human 18 --visual-prune-percent 70 \
-  --max-image-pixels 4194304 --max-image-patches 1 --max-new-tokens 32 \
-  --verify-candidates 0 --no-save-diagnostics \
-  --output-dir outputs/perturbation/prune_70
+python evaluate.py --data "$DATA" --model "$MODEL" --offline --gpus 0 \
+  --method perturbation --layer 18 --prune-percent 70 \
+  --output-dir outputs/perturbation/L18/prune_70
+
+python evaluate.py --data "$DATA" --model "$MODEL" --offline --gpus 0 \
+  --method base --output-dir outputs/base
 ```
 
-`--visual-prune-percent 70` 表示删除 70%。在第 L 层完成文本相关性评分，从原生第 L+1 层取得 Q/K/V，完成该层后剪枝，后续视觉层使用保留的 token。
-
-批量测试 50、60、70、80、85、90%：
+批量测试 50、60、70、80、85、90、95、98%，支持续跑：
 
 ```bash
-bash scripts/run_perturbation_optimized_50_90.sh
+bash scripts/run_sweep.sh "$DATA" "$MODEL" 0 outputs/perturbation 18
 ```
 
-方法定义与参数见 [扰动方法](docs/perturbation.md)。
+默认 bf16、4M 像素、单视图、最多 32 个输出 token。`--layer L` 在第 L 层评分，读取原生第 L+1 层 Q/K/V，完成该层后裁剪；后续视觉层使用保留组。`--prune-percent` 是删除比例。`--method nocover` 为无局部覆盖对照，`--implementation reference` 使用参考统计。
 
-## 原生 base 对照
+## 方法与结果
 
-使用相同图像与生成设置，直接输入原生 Qwen3-VL，不执行剪枝：
+文本 Top-K 作为查询集合，全部查询对完整源 Key 归一化。计算各原始查询/head 的组删除 readout 差值平方范数后，再按问题权重聚合。查询集合内的扰动权重置零，用非负局部余弦图逐轮选择文本概率与新增残差覆盖收益最大的组，保留恰好 K 个完整组。
 
-```bash
-python test_base.py \
-  --data "$DATA" --model "$MODEL" --offline --gpus 0 --dtype bf16 \
-  --max-image-pixels 4194304 --max-image-patches 1 --max-new-tokens 32 \
-  --output-dir outputs/qwen3_base_current
-```
+每次运行保存 `config.json`、`results.jsonl`、`summary.json`、`results.md`、`test.log`。原命令加 `--resume` 可继续缺失或失败题目。`--diagnostics full` 保存完整扰动图数组。
 
-## 结果
-
-每次运行生成 `config.json`、`results.jsonl`、`summary.json`、`results.md` 和 `test.log`。中断后在原命令增加 `--resume`，成功题目会被复用。
-
-Avg. 为 13 个任务的宏平均准确率。time 为视觉编码至答案解码的平均每题时间，预处理与预热不计入。TFLOPs 按实际 raw-patch 视觉长度、ViT attention、原生 merger 和文本模型估算；base 与扰动方法使用同一口径。它是部分解析估计，不能与旧版仅按合并组计数的结果直接比较。
-
-## 测试
+Avg. 是 13 任务宏平均；time 覆盖视觉编码至答案解码，预处理和预热除外。TFLOPs 是包含 raw-patch ViT attention、原生 merger、选点器及文本模型的部分解析估计，base 与剪枝使用相同口径。
 
 ```bash
+python scripts/summarize.py --input-root outputs --output-prefix outputs/summary
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m unittest discover -s tests -v
 ```
